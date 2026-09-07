@@ -1,0 +1,1134 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createFileRoute } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  Box,
+  CheckCircle2,
+  ExternalLink,
+  FileDown,
+  Heart,
+  History,
+  Import,
+  Info,
+  LayoutGrid,
+  List,
+  Loader2,
+  Megaphone,
+  Radar,
+  RefreshCw,
+  Search,
+  Star,
+  Tags,
+  Users,
+} from "lucide-react";
+import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
+import {
+  formatMemberCount,
+  radarApi,
+  RADAR_STATUS_CLASSES,
+  RADAR_STATUS_LABELS,
+  RADAR_SUGGESTED_TERMS,
+  exportGroupsCsv,
+  exportGroupsXls,
+  type RadarGroup,
+  type RadarStatus,
+} from "@/lib/radar";
+import {
+  useRadarGroups,
+  useRadarLists,
+  useRadarUpdateEstado,
+  useRadarBuscaHistory,
+  useRadarListaGrupos,
+  useRadarListaGruposMap,
+  useRadarCreateLista,
+} from "@/hooks/useRadar";
+
+export const Route = createFileRoute("/painel/grupos")({
+  head: () => ({
+    meta: [{ title: "Radar de Grupos" }, { name: "robots", content: "noindex" }],
+  }),
+  component: RadarGruposPage,
+});
+
+const TAMANHOS = [10000, 50000, 100000, 200000, 500000, 1000000] as const;
+
+type Sort = "maiores" | "relevancia" | "recentes";
+type Visibilidade = "todos" | "publico";
+type StatusFilter = "todos" | RadarStatus;
+
+const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
+  { value: "todos", label: "Todos" },
+  { value: "quero_entrar", label: "Quero entrar" },
+  { value: "solicitado", label: "Solicitado" },
+  { value: "aguardando", label: "Aguardando" },
+  { value: "membro", label: "Membro" },
+  { value: "nao_interesse", label: "Sem interesse" },
+];
+
+function RadarGruposPage() {
+  const queryClient = useQueryClient();
+  const { data: gruposSalvos = [], isLoading: loadingSalvos } = useRadarGroups();
+  const updateEstado = useRadarUpdateEstado();
+
+  const [term, setTerm] = useState("");
+  const [selectedTerms, setSelectedTerms] = useState<string[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [stage, setStage] = useState("procurando");
+  const [lastResults, setLastResults] = useState<RadarGroup[] | null>(null);
+  const [lastMeta, setLastMeta] = useState<{
+    total_unique: number;
+    total_cache_new: number;
+    confirmed_count: number;
+    unconfirmed_count: number;
+  } | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  const [minMembers, setMinMembers] = useState<number | null>(null);
+  const [visibilidade, setVisibilidade] = useState<Visibilidade>("todos");
+  const [sort, setSort] = useState<Sort>("maiores");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("todos");
+
+  const [view, setView] = useState<"cards" | "tabela">("cards");
+  const [detail, setDetail] = useState<RadarGroup | null>(null);
+
+  const stageTimer = useRef<number | null>(null);
+
+  const baseGroups = lastResults && lastResults.length > 0 ? lastResults : gruposSalvos;
+
+  const filtered = useMemo(() => {
+    let list = baseGroups;
+    if (minMembers)
+      list = list.filter((g) => g.member_count != null && g.member_count >= minMembers);
+    if (visibilidade === "publico") list = list.filter((g) => g.is_public === true);
+    if (statusFilter !== "todos") list = list.filter((g) => g.status === statusFilter);
+    const arr = [...list];
+    if (sort === "maiores") {
+      arr.sort((a, b) => (b.member_count ?? -1) - (a.member_count ?? -1));
+    } else if (sort === "recentes") {
+      arr.sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
+    } else {
+      arr.sort((a, b) => {
+        const aConfirmed = a.member_count != null ? 1 : 0;
+        const bConfirmed = b.member_count != null ? 1 : 0;
+        if (aConfirmed !== bConfirmed) return bConfirmed - aConfirmed;
+        return (b.member_count ?? -1) - (a.member_count ?? -1);
+      });
+    }
+    return arr;
+  }, [baseGroups, minMembers, visibilidade, statusFilter, sort]);
+
+  async function runSearch(preset?: string) {
+    const termo = (preset ?? term).trim();
+    if (!termo) return;
+    setSearching(true);
+    setLastResults(null);
+    setLastMeta(null);
+    setStage("procurando");
+    const stages = ["procurando", "verificando", "salvando"];
+    let i = 0;
+    stageTimer.current = window.setInterval(() => {
+      i = (i + 1) % stages.length;
+      setStage(stages[i]!);
+    }, 3500);
+    const res = await radarApi.search(termo, selectedTerms);
+    if (stageTimer.current) window.clearInterval(stageTimer.current);
+    setSearching(false);
+    if (!res.success || res.error) {
+      toast.error(res.error ?? "Não foi possível buscar os grupos agora.");
+      return;
+    }
+    setTerm("");
+    setLastResults(res.groups);
+    setLastMeta(res);
+    queryClient.invalidateQueries({ queryKey: ["radar-grupos"] });
+    toast.success(
+      `Busca concluída: ${res.total_unique} grupos (${res.confirmed_count} com membros confirmados).`,
+    );
+  }
+
+  useEffect(
+    () => () => {
+      if (stageTimer.current) window.clearInterval(stageTimer.current);
+    },
+    [],
+  );
+
+  function toggleTerm(t: string) {
+    setSelectedTerms((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
+  }
+
+  async function handleImport(urls: string[]) {
+    if (urls.length === 0) return;
+    setSearching(true);
+    setStage("importando");
+    const res = await radarApi.import(urls);
+    setSearching(false);
+    if (!res.success || res.error) {
+      toast.error(res.error ?? "Falha ao importar os links.");
+      return;
+    }
+    setImportOpen(false);
+    setLastResults(res.groups);
+    setLastMeta(res);
+    queryClient.invalidateQueries({ queryKey: ["radar-grupos"] });
+    toast.success(`${res.total_unique} grupos importados.`);
+  }
+
+  async function handleRecheck(group: RadarGroup) {
+    const res = await radarApi.recheck(group.url);
+    if (!res.success || !res.group) {
+      toast.error(res.error ?? "Falha ao verificar.");
+      return;
+    }
+    queryClient.invalidateQueries({ queryKey: ["radar-grupos"] });
+    setLastResults((prev) =>
+      prev ? prev.map((g) => (g.id === res.group!.id ? res.group! : g)) : prev,
+    );
+    setDetail((prev) => (prev ? res.group! : prev));
+    toast.success("Grupo verificado novamente.");
+  }
+
+  async function toggleFavorito(group: RadarGroup) {
+    await updateEstado.mutateAsync({ grupoId: group.id, patch: { favorito: !group.favorito } });
+  }
+
+  async function changeStatus(group: RadarGroup, status: RadarStatus) {
+    await updateEstado.mutateAsync({ grupoId: group.id, patch: { status } });
+  }
+
+  const stats = useMemo(() => {
+    const total = gruposSalvos.length;
+    const favoritos = gruposSalvos.filter((g) => g.favorito).length;
+    const maiores = gruposSalvos.filter(
+      (g) => g.member_count != null && g.member_count >= 100000,
+    ).length;
+    const membro = gruposSalvos.filter((g) => g.status === "membro").length;
+    return { total, favoritos, maiores, membro };
+  }, [gruposSalvos]);
+
+  return (
+    <div className="px-5 pb-10 pt-10">
+      <header className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="flex items-center gap-2 text-2xl font-bold text-foreground">
+            <Radar className="size-6 text-primary" />
+            Radar de Grupos
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Encontre e organize grupos públicos do Facebook do seu nicho para divulgar seu trabalho.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setHistoryOpen(true)}
+            title="Histórico"
+          >
+            <History className="size-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setImportOpen(true)}
+            title="Importar links"
+          >
+            <Import className="size-4" />
+          </Button>
+        </div>
+      </header>
+
+      {/* Estatísticas rápidas */}
+      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[
+          { label: "Grupos salvos", value: stats.total, icon: Users },
+          { label: "Favoritos", value: stats.favoritos, icon: Star },
+          { label: "100k+ membros", value: stats.maiores, icon: Radar },
+          { label: "Sou membro", value: stats.membro, icon: CheckCircle2 },
+        ].map((s) => (
+          <Card key={s.label} className="bg-card">
+            <CardContent className="flex items-center gap-3 p-4">
+              <s.icon className="size-5 shrink-0 text-primary" />
+              <div>
+                <div className="text-xl font-bold leading-none">{s.value}</div>
+                <div className="mt-1 text-xs text-muted-foreground">{s.label}</div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Busca */}
+      <Card className="mt-5">
+        <CardContent className="space-y-3 p-4">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={term}
+                onChange={(e) => setTerm(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && runSearch()}
+                placeholder="Buscar nicho, ex.: papelaria personalizada"
+                className="pl-9"
+                disabled={searching}
+              />
+            </div>
+            <Button onClick={() => runSearch()} disabled={searching || !term.trim()}>
+              {searching ? <Loader2 className="size-4 animate-spin" /> : "Buscar"}
+            </Button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">Termos extra:</span>
+            {RADAR_SUGGESTED_TERMS.slice(0, 8).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => toggleTerm(t)}
+                className={cn(
+                  "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
+                  selectedTerms.includes(t)
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border bg-background text-muted-foreground hover:border-primary/50",
+                )}
+              >
+                {t}
+              </button>
+            ))}
+            {selectedTerms.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setSelectedTerms([])}
+                className="text-xs text-destructive underline"
+              >
+                limpar
+              </button>
+            )}
+          </div>
+
+          {searching && (
+            <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-foreground">
+              <Loader2 className="size-4 animate-spin text-primary" />
+              {stage === "procurando" && "Procurando grupos públicos em fontes abertas..."}
+              {stage === "verificando" && "Verificando páginas públicas e contagens de membros..."}
+              {stage === "salvando" && "Salvando e organizando resultados..."}
+              {stage === "importando" && "Importando links e verificando..."}
+            </div>
+          )}
+
+          {lastMeta && !searching && (
+            <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+              <Badge variant="secondary">{lastMeta.total_unique} grupos encontrados</Badge>
+              <Badge variant="secondary">{lastMeta.total_cache_new} novos</Badge>
+              <Badge variant="secondary">{lastMeta.confirmed_count} com membros confirmados</Badge>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Filtros */}
+      <Card className="mt-3">
+        <CardContent className="space-y-3 p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-muted-foreground">Mínimo de membros:</span>
+            <Button
+              size="sm"
+              variant={minMembers == null ? "secondary" : "ghost"}
+              onClick={() => setMinMembers(null)}
+            >
+              Todos
+            </Button>
+            {TAMANHOS.map((t) => (
+              <Button
+                key={t}
+                size="sm"
+                variant={minMembers === t ? "secondary" : "ghost"}
+                onClick={() => setMinMembers(minMembers === t ? null : t)}
+              >
+                {t >= 1000000 ? "1 mi" : `${t / 1000}k`}
+              </Button>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-muted-foreground">Visibilidade:</span>
+              <div className="flex gap-1">
+                <Button
+                  size="sm"
+                  variant={visibilidade === "todos" ? "secondary" : "ghost"}
+                  onClick={() => setVisibilidade("todos")}
+                >
+                  Todos
+                </Button>
+                <Button
+                  size="sm"
+                  variant={visibilidade === "publico" ? "secondary" : "ghost"}
+                  onClick={() => setVisibilidade("publico")}
+                >
+                  Só públicos
+                </Button>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-muted-foreground">Ordenar:</span>
+              <select
+                value={sort}
+                onChange={(e) => setSort(e.target.value as Sort)}
+                className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+              >
+                <option value="maiores">Maiores confirmados</option>
+                <option value="relevancia">Relevância</option>
+                <option value="recentes">Mais recentes</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-muted-foreground">Meu status:</span>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+                className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+              >
+                {STATUS_FILTERS.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="ml-auto flex items-center gap-2">
+              <div className="flex rounded-md border border-input">
+                <button
+                  onClick={() => setView("cards")}
+                  className={cn(
+                    "flex items-center gap-1 rounded-md px-2 py-1.5 text-xs",
+                    view === "cards" ? "bg-muted text-foreground" : "text-muted-foreground",
+                  )}
+                >
+                  <LayoutGrid className="size-3.5" /> Cards
+                </button>
+                <button
+                  onClick={() => setView("tabela")}
+                  className={cn(
+                    "flex items-center gap-1 rounded-md px-2 py-1.5 text-xs",
+                    view === "tabela" ? "bg-muted text-foreground" : "text-muted-foreground",
+                  )}
+                >
+                  <List className="size-3.5" /> Tabela
+                </button>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => exportGroupsCsv(filtered)}
+                disabled={filtered.length === 0}
+                title="Exportar CSV"
+              >
+                <FileDown className="size-4" /> CSV
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => exportGroupsXls(filtered)}
+                disabled={filtered.length === 0}
+                title="Exportar Excel"
+              >
+                <FileDown className="size-4" /> Excel
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Lista */}
+      <div className="mt-4">
+        {loadingSalvos && !lastResults ? (
+          <div className="space-y-3">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} className="h-24 w-full rounded-xl" />
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            searching={searching}
+            hasSaved={gruposSalvos.length > 0}
+            onSearch={() => term && runSearch()}
+          />
+        ) : view === "cards" ? (
+          <div className="grid gap-3">
+            {filtered.map((g) => (
+              <GroupCard
+                key={g.id}
+                group={g}
+                onOpen={() => setDetail(g)}
+                onFavorito={() => toggleFavorito(g)}
+                onStatus={(s) => changeStatus(g, s)}
+                onRecheck={() => handleRecheck(g)}
+              />
+            ))}
+          </div>
+        ) : (
+          <Card>
+            <CardContent className="overflow-x-auto p-0">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-border text-xs text-muted-foreground">
+                    <th className="px-3 py-2 font-medium">Grupo</th>
+                    <th className="px-3 py-2 font-medium">Membros</th>
+                    <th className="px-3 py-2 font-medium">Visibilidade</th>
+                    <th className="px-3 py-2 font-medium">Status</th>
+                    <th className="px-3 py-2 font-medium">Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((g) => (
+                    <TableRow
+                      key={g.id}
+                      group={g}
+                      onOpen={() => setDetail(g)}
+                      onFavorito={() => toggleFavorito(g)}
+                      onStatus={(s) => changeStatus(g, s)}
+                      onRecheck={() => handleRecheck(g)}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      <GroupsDetailDialog
+        open={!!detail}
+        onOpenChange={(o) => setDetail(o ? detail : null)}
+        group={detail}
+        onStatus={(s) => detail && changeStatus(detail, s)}
+        onRecheck={() => detail && handleRecheck(detail)}
+        onFavorito={() => detail && toggleFavorito(detail)}
+      />
+
+      <ImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        onImport={handleImport}
+        busy={searching}
+      />
+
+      <HistoryDialog
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        onReuse={(q) => {
+          setHistoryOpen(false);
+          runSearch(q);
+        }}
+      />
+    </div>
+  );
+}
+
+function MemberBadge({ group }: { group: RadarGroup }) {
+  if (group.member_count != null) {
+    return (
+      <div className="flex items-center gap-1">
+        <Users className="size-4 text-primary" />
+        <span className="text-sm font-semibold">{formatMemberCount(group)}</span>
+        {group.member_checked_at && (
+          <span className="text-[10px] text-muted-foreground">
+            {new Date(group.member_checked_at).toLocaleDateString("pt-BR")}
+          </span>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-1 text-muted-foreground">
+      <Info className="size-4" />
+      <span className="text-xs">Não confirmado</span>
+    </div>
+  );
+}
+
+function GroupCard({
+  group,
+  onOpen,
+  onFavorito,
+  onStatus,
+  onRecheck,
+}: {
+  group: RadarGroup;
+  onOpen: () => void;
+  onFavorito: () => void;
+  onStatus: (s: RadarStatus) => void;
+  onRecheck: () => void;
+}) {
+  return (
+    <Card className="cursor-pointer" onClick={onOpen}>
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="truncate font-semibold text-foreground">{group.name}</h3>
+              <Badge
+                variant={group.is_public === false ? "destructive" : "secondary"}
+                className="shrink-0"
+              >
+                {group.is_public == null ? "Desconhecido" : group.is_public ? "Público" : "Privado"}
+              </Badge>
+            </div>
+            {group.categoria && (
+              <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                <Tags className="size-3" /> {group.categoria}
+              </div>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                void onFavorito();
+              }}
+              className={cn(
+                "rounded-md p-1.5 transition-colors",
+                group.favorito ? "text-amber-500" : "text-muted-foreground hover:text-amber-500",
+              )}
+              title="Favorito"
+            >
+              <Heart className={cn("size-4", group.favorito && "fill-current")} />
+            </button>
+          </div>
+        </div>
+
+        {group.description && (
+          <p className="mt-2 line-clamp-2 text-sm text-muted-foreground">{group.description}</p>
+        )}
+
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <MemberBadge group={group} />
+          <Badge className={RADAR_STATUS_CLASSES[group.status]}>
+            {RADAR_STATUS_LABELS[group.status]}
+          </Badge>
+        </div>
+
+        <div className="mt-3 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+          <a
+            href={group.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            <ExternalLink className="size-3.5" /> Ver no Facebook
+          </a>
+          <select
+            value={group.status}
+            onChange={(e) => void onStatus(e.target.value as RadarStatus)}
+            className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+            title="Atualizar meu status"
+          >
+            {Object.entries(RADAR_STATUS_LABELS).map(([v, l]) => (
+              <option key={v} value={v}>
+                {l}
+              </option>
+            ))}
+          </select>
+          {group.member_count == null && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void onRecheck()}
+              title="Verificar novamente"
+            >
+              <RefreshCw className="size-3.5" /> Verificar
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TableRow({
+  group,
+  onOpen,
+  onFavorito,
+  onStatus,
+  onRecheck,
+}: {
+  group: RadarGroup;
+  onOpen: () => void;
+  onFavorito: () => void;
+  onStatus: (s: RadarStatus) => void;
+  onRecheck: () => void;
+}) {
+  return (
+    <tr className="border-b border-border last:border-0 hover:bg-muted/40" onClick={onOpen}>
+      <td className="max-w-[14rem] px-3 py-2.5">
+        <div className="truncate font-medium text-foreground">{group.name}</div>
+        {group.categoria && (
+          <div className="truncate text-xs text-muted-foreground">{group.categoria}</div>
+        )}
+      </td>
+      <td className="px-3 py-2.5">
+        {group.member_count != null ? (
+          <span className="font-medium">{formatMemberCount(group)}</span>
+        ) : (
+          <span className="text-xs text-muted-foreground">Não confirmado</span>
+        )}
+      </td>
+      <td className="px-3 py-2.5">
+        {group.is_public == null ? (
+          <span className="text-xs text-muted-foreground">—</span>
+        ) : (
+          <Badge variant={group.is_public ? "secondary" : "destructive"}>
+            {group.is_public ? "Público" : "Privado"}
+          </Badge>
+        )}
+      </td>
+      <td className="px-3 py-2.5">
+        <Badge className={RADAR_STATUS_CLASSES[group.status]}>
+          {RADAR_STATUS_LABELS[group.status]}
+        </Badge>
+      </td>
+      <td className="px-3 py-2.5">
+        <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+          <a
+            href={group.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-md p-1.5 text-muted-foreground hover:text-primary"
+            title="Ver no Facebook"
+          >
+            <ExternalLink className="size-4" />
+          </a>
+          <button
+            onClick={() => void onFavorito()}
+            className={cn(
+              "rounded-md p-1.5 text-muted-foreground hover:text-amber-500",
+              group.favorito && "text-amber-500",
+            )}
+            title="Favorito"
+          >
+            <Heart className={cn("size-4", group.favorito && "fill-current")} />
+          </button>
+          {group.member_count == null && (
+            <button
+              onClick={() => void onRecheck()}
+              className="rounded-md p-1.5 text-muted-foreground hover:text-primary"
+              title="Verificar novamente"
+            >
+              <RefreshCw className="size-4" />
+            </button>
+          )}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function EmptyState({
+  searching,
+  hasSaved,
+  onSearch,
+}: {
+  searching: boolean;
+  hasSaved: boolean;
+  onSearch: () => void;
+}) {
+  return (
+    <div className="grid place-items-center rounded-xl border border-dashed py-14 text-center">
+      <div className="space-y-2">
+        {searching ? (
+          <Loader2 className="mx-auto size-8 animate-spin text-primary" />
+        ) : (
+          <Box className="mx-auto size-8 text-muted-foreground" />
+        )}
+        <p className="text-sm font-medium text-foreground">
+          {hasSaved ? "Nenhum grupo corresponde aos filtros." : "Nenhum grupo salvo ainda."}
+        </p>
+        <p className="max-w-sm px-4 text-xs text-muted-foreground">
+          Digite um nicho acima (ex.: “papelaria personalizada”) e busque em fontes públicas. Você
+          também pode importar links colando URLs de grupos.
+        </p>
+        {!searching && hasSaved && onSearch ? (
+          <Button size="sm" variant="outline" onClick={onSearch}>
+            Buscar de novo
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function GroupsDetailDialog({
+  open,
+  onOpenChange,
+  group,
+  onStatus,
+  onRecheck,
+  onFavorito,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  group: RadarGroup | null;
+  onStatus: (s: RadarStatus) => void;
+  onRecheck: () => void;
+  onFavorito: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const updateEstado = useRadarUpdateEstado();
+  const { data: listas = [] } = useRadarLists();
+  const { data: listaMap } = useRadarListaGruposMap();
+  const [notas, setNotas] = useState("");
+  const [tags, setTags] = useState("");
+  const [permite, setPermite] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (group) {
+      setNotas(group.notas ?? "");
+      setTags((group.tags ?? []).join(", "));
+      setPermite(group.permite_divulgacao);
+    }
+  }, [group]);
+
+  if (!group) return null;
+
+  async function salvarDetalhes() {
+    if (!group) return;
+    setSaving(true);
+    const tagList = tags
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    try {
+      await updateEstado.mutateAsync({
+        grupoId: group.id,
+        patch: { notas, tags: tagList, permite_divulgacao: permite },
+      });
+      queryClient.invalidateQueries({ queryKey: ["radar-grupos"] });
+      toast.success("Detalhes salvos.");
+    } catch {
+      toast.error("Não foi possível salvar.");
+    }
+    setSaving(false);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="pr-8">{group.name}</DialogTitle>
+          <DialogDescription className="flex flex-wrap items-center gap-2">
+            <Badge variant={group.is_public === false ? "destructive" : "secondary"}>
+              {group.is_public == null
+                ? "Visibilidade desconhecida"
+                : group.is_public
+                  ? "Grupo público"
+                  : "Grupo privado"}
+            </Badge>
+            <Badge className={RADAR_STATUS_CLASSES[group.status]}>
+              {RADAR_STATUS_LABELS[group.status]}
+            </Badge>
+            <MemberBadge group={group} />
+          </DialogDescription>
+        </DialogHeader>
+
+        {group.description && <p className="text-sm text-muted-foreground">{group.description}</p>}
+
+        <div className="flex items-center gap-2">
+          <a
+            href={group.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            <ExternalLink className="size-4" /> Abrir no Facebook e solicitar entrada
+          </a>
+          {group.member_count == null && (
+            <Button
+              variant="outline"
+              onClick={() => void onRecheck()}
+              title="Verificar contagem novamente"
+            >
+              <RefreshCw className="size-4" />
+            </Button>
+          )}
+        </div>
+
+        <div className="grid gap-2">
+          <div className="flex items-center justify-between text-sm">
+            <label className="font-medium">Status de participação</label>
+            <select
+              value={group.status}
+              onChange={(e) => void onStatus(e.target.value as RadarStatus)}
+              className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+            >
+              {Object.entries(RADAR_STATUS_LABELS).map(([v, l]) => (
+                <option key={v} value={v}>
+                  {l}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+            <div className="flex items-center gap-2 text-sm">
+              <Heart className={cn("size-4", group.favorito && "fill-current text-amber-500")} />
+              Favorito
+            </div>
+            <Switch checked={group.favorito} onCheckedChange={() => void onFavorito()} />
+          </div>
+          <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+            <div className="flex items-center gap-2 text-sm">
+              <Megaphone className="size-4 text-foreground" />O grupo permite divulgação?
+            </div>
+            <Switch checked={permite} onCheckedChange={setPermite} />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Notas</label>
+          <Textarea
+            value={notas}
+            onChange={(e) => setNotas(e.target.value)}
+            placeholder="Observações, regras, contato do moderador..."
+            rows={3}
+          />
+        </div>
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Tags</label>
+          <Input
+            value={tags}
+            onChange={(e) => setTags(e.target.value)}
+            placeholder="separadas por vírgula, ex.: papelaria, divulgacao, 100k"
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-sm font-medium">Listas</label>
+          {listas.length === 0 ? (
+            <p className="text-xs text-muted-foreground">Você ainda não criou listas.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {listas.map((l) => (
+                <ListaToggle
+                  key={l.id}
+                  listaId={l.id}
+                  nome={l.nome}
+                  icone={l.icone}
+                  grupoId={group.id}
+                  checked={listaMap?.get(l.id)?.has(group.id) ?? false}
+                />
+              ))}
+            </div>
+          )}
+          <NovaListaInput
+            onCriada={() => queryClient.invalidateQueries({ queryKey: ["radar-listasy"] })}
+          />
+        </div>
+
+        <Button onClick={() => void salvarDetalhes()} disabled={saving}>
+          {saving && <Loader2 className="size-4 animate-spin" />} Salvar detalhes
+        </Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ListaToggle({
+  listaId,
+  nome,
+  icone,
+  grupoId,
+  checked,
+}: {
+  listaId: string;
+  nome: string;
+  icone: string | null;
+  grupoId: string;
+  checked: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const listaGrupos = useRadarListaGrupos();
+  return (
+    <label className="flex cursor-pointer items-center justify-between rounded-md border border-border px-3 py-2">
+      <span className="flex items-center gap-2 text-sm">
+        {icone ?? <Box className="size-4 text-muted-foreground" />} {nome}
+      </span>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={async (e) => {
+          await listaGrupos.mutateAsync({ listaId, grupos: [{ grupoId, isIn: e.target.checked }] });
+          queryClient.invalidateQueries({ queryKey: ["radar-lista-grupos-map"] });
+        }}
+        className="size-4 accent-primary"
+      />
+    </label>
+  );
+}
+
+function NovaListaInput({ onCriada }: { onCriada: () => void }) {
+  const createLista = useRadarCreateLista();
+  const [nome, setNome] = useState("");
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="flex gap-2 pt-1">
+      <Input
+        value={nome}
+        onChange={(e) => setNome(e.target.value)}
+        placeholder="Nova lista (ex.: Divulgação permitida)"
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && nome.trim()) {
+            e.preventDefault();
+            void (async () => {
+              setBusy(true);
+              try {
+                await createLista.mutateAsync({ nome: nome.trim() });
+                setNome("");
+                onCriada();
+              } catch {
+                toast.error("Não foi possível criar a lista.");
+              }
+              setBusy(false);
+            })();
+          }
+        }}
+      />
+      <Button
+        size="sm"
+        disabled={busy || !nome.trim()}
+        onClick={() => {
+          void (async () => {
+            setBusy(true);
+            try {
+              await createLista.mutateAsync({ nome: nome.trim() });
+              setNome("");
+              onCriada();
+            } catch {
+              toast.error("Não foi possível criar a lista.");
+            }
+            setBusy(false);
+          })();
+        }}
+      >
+        {busy ? <Loader2 className="size-4 animate-spin" /> : "Criar"}
+      </Button>
+    </div>
+  );
+}
+
+function ImportDialog({
+  open,
+  onOpenChange,
+  onImport,
+  busy,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  onImport: (urls: string[]) => void;
+  busy: boolean;
+}) {
+  const [text, setText] = useState("");
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Importar links do Facebook</DialogTitle>
+          <DialogDescription>
+            Cole os links dos grupos que você já conhece (um por linha). O Radar vai verificar e
+            salvar.
+          </DialogDescription>
+        </DialogHeader>
+        <Textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={5}
+          placeholder={
+            "https://www.facebook.com/groups/12345\nhttps://www.facebook.com/groups/67890"
+          }
+        />
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            className="flex-1"
+            onClick={() => onOpenChange(false)}
+            disabled={busy}
+          >
+            Cancelar
+          </Button>
+          <Button
+            className="flex-1"
+            disabled={busy || !text.trim()}
+            onClick={() => {
+              const urls = text
+                .split("\n")
+                .map((l) => l.trim())
+                .filter(Boolean);
+              void onImport(urls);
+            }}
+          >
+            {busy && <Loader2 className="size-4 animate-spin" />} Importar
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function HistoryDialog({
+  open,
+  onOpenChange,
+  onReuse,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  onReuse: (term: string) => void;
+}) {
+  const { data: history = [], isLoading } = useRadarBuscaHistory();
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Histórico de buscas</DialogTitle>
+          <DialogDescription>Repita uma busca anterior com um clique.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2">
+          {isLoading && <Skeleton className="h-10 w-full" />}
+          {!isLoading && history.length === 0 && (
+            <p className="text-sm text-muted-foreground">Nenhuma busca até agora.</p>
+          )}
+          {history.map((h) => (
+            <button
+              key={h.id}
+              type="button"
+              onClick={() => onReuse(h.termo)}
+              className="flex w-full items-center justify-between rounded-md border border-border px-3 py-2 text-left text-sm transition-colors hover:bg-muted"
+            >
+              <span className="truncate font-medium">{h.termo}</span>
+              <span className="ml-3 shrink-0 text-xs text-muted-foreground">
+                {h.total_grupos} grupos · {new Date(h.created_at).toLocaleDateString("pt-BR")}
+              </span>
+            </button>
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

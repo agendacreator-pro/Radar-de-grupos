@@ -1,0 +1,284 @@
+﻿@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+:root {
+  --radius: 1rem;
+  --background: oklch(0.99 0.008 305);
+  --foreground: oklch(0.24 0.04 305);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.24 0.04 305);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.24 0.04 305);
+  --primary: oklch(0.58 0.16 305);
+  --primary-foreground: oklch(0.99 0.005 305);
+  --secondary: oklch(0.96 0.02 305);
+  --secondary-foreground: oklch(0.35 0.06 305);
+  --muted: oklch(0.965 0.015 305);
+  --muted-foreground: oklch(0.52 0.03 305);
+  --accent: oklch(0.95 0.04 305);
+  --accent-foreground: oklch(0.42 0.11 305);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.984 0.003 247.858);
+  --border: oklch(0.92 0.015 305);
+  --input: oklch(0.92 0.015 305);
+  --ring: oklch(0.58 0.16 305);
+  --primary-glow: oklch(0.58 0.16 305 / 0.32);
+  --chart-1: oklch(0.58 0.16 305);
+  --chart-2: oklch(0.52 0.12 340);
+  --chart-3: oklch(0.48 0.14 280);
+  --chart-4: oklch(0.72 0.14 305);
+  --chart-5: oklch(0.66 0.18 320);
+  --sidebar: oklch(0.99 0.008 305);
+  --sidebar-foreground: oklch(0.24 0.04 305);
+  --sidebar-primary: oklch(0.58 0.16 305);
+  --sidebar-primary-foreground: oklch(0.99 0.005 305);
+  --sidebar-accent: oklch(0.95 0.04 305);
+  --sidebar-accent-foreground: oklch(0.42 0.11 305);
+  --sidebar-border: oklch(0.92 0.015 305);
+  --sidebar-ring: oklch(0.58 0.16 305);
+}
+
+.dark {
+  --background: oklch(0.16 0.04 305);
+  --foreground: oklch(0.98 0.005 305);
+  --card: oklch(0.22 0.04 305);
+  --card-foreground: oklch(0.98 0.005 305);
+  --popover: oklch(0.22 0.04 305);
+  --popover-foreground: oklch(0.98 0.005 305);
+  --primary: oklch(0.72 0.14 305);
+  --primary-foreground: oklch(0.22 0.04 305);
+  --secondary: oklch(0.28 0.04 305);
+  --secondary-foreground: oklch(0.98 0.005 305);
+  --muted: oklch(0.28 0.04 305);
+  --muted-foreground: oklch(0.7 0.03 305);
+  --accent: oklch(0.28 0.04 305);
+  --accent-foreground: oklch(0.98 0.005 305);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.984 0.003 247.858);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.65 0.04 305);
+  --primary-glow: oklch(0.72 0.14 305 / 0.25);
+  --chart-1: oklch(0.72 0.14 305);
+  --chart-2: oklch(0.52 0.12 340);
+  --chart-3: oklch(0.48 0.14 280);
+  --chart-4: oklch(0.72 0.14 305);
+  --chart-5: oklch(0.66 0.18 320);
+  --sidebar: oklch(0.22 0.04 305);
+  --sidebar-foreground: oklch(0.98 0.005 305);
+  --sidebar-primary: oklch(0.72 0.14 305);
+  --sidebar-primary-foreground: oklch(0.98 0.005 305);
+  --sidebar-accent: oklch(0.28 0.04 305);
+  --sidebar-accent-foreground: oklch(0.98 0.005 305);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.65 0.04 305);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+  }
+}
+
+@theme inline {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", Georgia, serif;
+}
+
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+}
+
+@utility app-shell {
+  margin-inline: auto;
+  width: 100%;
+  max-width: 30rem;
+  min-height: 100dvh;
+  background-color: var(--color-background);
+}
+
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@utility input-base {
+  width: 100%;
+  border-radius: 1rem;
+  border: 1px solid var(--color-input);
+  background-color: var(--color-card);
+  padding: 0.875rem 1rem;
+  font-size: 1rem;
+  outline: none;
+  &:focus {
+    border-color: var(--color-primary);
+  }
+}
+
+/* Botao flutuante (home hero). */
+@utility btn-float {
+  border-radius: 9999px;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.05),
+    0 10px 24px -8px var(--primary-glow),
+    0 22px 48px -16px var(--primary-glow);
+  transition:
+    transform 160ms ease,
+    box-shadow 200ms ease;
+  animation: btn-float-breathe 3.2s ease-in-out infinite;
+
+  &:active {
+    transform: scale(0.96);
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.05),
+      0 4px 14px -4px var(--primary-glow);
+    animation: none;
+  }
+}
+
+/* Botao elevado (CTAs do painel, etc.). */
+@utility btn-elevated {
+  border-radius: 9999px;
+  box-shadow:
+    0 2px 4px rgb(0 0 0 / 0.06),
+    0 6px 16px -4px var(--primary-glow);
+  transition:
+    transform 150ms ease,
+    box-shadow 200ms ease;
+
+  &:active {
+    transform: scale(0.96);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.06);
+  }
+}
+
+@keyframes btn-float-breathe {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+@keyframes cart-bump {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.18); }
+}
+
+.cart-bump {
+  animation: cart-bump 300ms ease;
+}
+
+/* ── Shimmer / glint effect for CTA buttons ── */
+@utility btn-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 40%,
+    rgba(255, 255, 255, 0.35) 45%,
+    rgba(255, 255, 255, 0.55) 50%,
+    rgba(255, 255, 255, 0.35) 55%,
+    transparent 60%
+  );
+  transform: translateX(-150%);
+  animation: shimmer-slide 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes shimmer-slide {
+  0%   { transform: translateX(-150%); }
+  50%  { transform: translateX(150%); }
+  100% { transform: translateX(150%); }
+}
+
+/* ── Floating WhatsApp button pulse ── */
+@utility whatsapp-float {
+  animation: whatsapp-float-bob 2.4s ease-in-out infinite;
+}
+
+@keyframes whatsapp-float-bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
+}
+
+/* ── Glassmorphism cover overlay ── */
+@utility cover-glass {
+  background: linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.1) 0%,
+    rgba(255, 255, 255, 0.25) 100%
+  );
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-float { animation: none; }
+  .cart-bump { animation: none; }
+  .btn-shimmer::after { animation: none; }
+  .whatsapp-float { animation: none; }
+}
