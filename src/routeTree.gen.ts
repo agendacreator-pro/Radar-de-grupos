@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as DbgRouteImport } from './routes/dbg'
 import { Route as PainelRouteImport } from './routes/painel'
 import { Route as PainelGruposRouteImport } from './routes/painel.grupos'
 
@@ -22,6 +23,11 @@ const IndexRoute = IndexRouteImport.update({
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DbgRoute = DbgRouteImport.update({
+  id: '/dbg',
+  path: '/dbg',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PainelRoute = PainelRouteImport.update({
@@ -38,12 +44,14 @@ const PainelGruposRoute = PainelGruposRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/dbg': typeof DbgRoute
   '/painel': typeof PainelRouteWithChildren
   '/painel/grupos': typeof PainelGruposRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/dbg': typeof DbgRoute
   '/painel': typeof PainelRouteWithChildren
   '/painel/grupos': typeof PainelGruposRoute
 }
@@ -51,20 +59,22 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/dbg': typeof DbgRoute
   '/painel': typeof PainelRouteWithChildren
   '/painel/grupos': typeof PainelGruposRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/painel' | '/painel/grupos'
+  fullPaths: '/' | '/auth' | '/dbg' | '/painel' | '/painel/grupos'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/painel' | '/painel/grupos'
-  id: '__root__' | '/' | '/auth' | '/painel' | '/painel/grupos'
+  to: '/' | '/auth' | '/dbg' | '/painel' | '/painel/grupos'
+  id: '__root__' | '/' | '/auth' | '/dbg' | '/painel' | '/painel/grupos'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthRoute: typeof AuthRoute
+  DbgRoute: typeof DbgRoute
   PainelRoute: typeof PainelRouteWithChildren
 }
 
@@ -82,6 +92,13 @@ declare module '@tanstack/react-router' {
       path: '/auth'
       fullPath: '/auth'
       preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dbg': {
+      id: '/dbg'
+      path: '/dbg'
+      fullPath: '/dbg'
+      preLoaderRoute: typeof DbgRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/painel': {
@@ -115,6 +132,7 @@ const PainelRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthRoute: AuthRoute,
+  DbgRoute: DbgRoute,
   PainelRoute: PainelRouteWithChildren,
 }
 export const routeTree = rootRouteImport

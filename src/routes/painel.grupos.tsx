@@ -40,7 +40,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
   formatMemberCount,
-  radarApi,
   RADAR_STATUS_CLASSES,
   RADAR_STATUS_LABELS,
   RADAR_SUGGESTED_TERMS,
@@ -49,6 +48,8 @@ import {
   type RadarGroup,
   type RadarStatus,
 } from "@/lib/radar";
+import { supabase } from "@/integrations/supabase/client";
+import { radarImport, radarRecheck, radarSearch } from "@/lib/radar-engine";
 import {
   useRadarGroups,
   useRadarLists,
@@ -136,7 +137,7 @@ function RadarGruposPage() {
 
   async function runSearch(preset?: string) {
     const termo = (preset ?? term).trim();
-    if (!termo) return;
+    if (!termo && selectedTerms.length === 0) return;
     setSearching(true);
     setLastResults(null);
     setLastMeta(null);
@@ -147,8 +148,25 @@ function RadarGruposPage() {
       i = (i + 1) % stages.length;
       setStage(stages[i]!);
     }, 3500);
-    const res = await radarApi.search(termo, selectedTerms);
-    if (stageTimer.current) window.clearInterval(stageTimer.current);
+    const clearStage = () => {
+      if (stageTimer.current) window.clearInterval(stageTimer.current);
+    };
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const token = session?.access_token ?? "";
+    const res = await radarSearch({ data: { q: termo, terms: selectedTerms, token } }).catch(
+      (err: unknown) => {
+        clearStage();
+        setSearching(false);
+        toast.error(
+          `Falha ao buscar (${err instanceof Error ? err.message : String(err)}). Entre novamente e tente outra vez.`,
+        );
+        return null;
+      },
+    );
+    if (!res) return;
+    clearStage();
     setSearching(false);
     if (!res.success || res.error) {
       toast.error(res.error ?? "Não foi possível buscar os grupos agora.");
@@ -178,7 +196,11 @@ function RadarGruposPage() {
     if (urls.length === 0) return;
     setSearching(true);
     setStage("importando");
-    const res = await radarApi.import(urls);
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const token = session?.access_token ?? "";
+    const res = await radarImport({ data: { urls, token } });
     setSearching(false);
     if (!res.success || res.error) {
       toast.error(res.error ?? "Falha ao importar os links.");
@@ -192,7 +214,11 @@ function RadarGruposPage() {
   }
 
   async function handleRecheck(group: RadarGroup) {
-    const res = await radarApi.recheck(group.url);
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const token = session?.access_token ?? "";
+    const res = await radarRecheck({ data: { url: group.url, token } });
     if (!res.success || !res.group) {
       toast.error(res.error ?? "Falha ao verificar.");
       return;
@@ -290,7 +316,10 @@ function RadarGruposPage() {
                 disabled={searching}
               />
             </div>
-            <Button onClick={() => runSearch()} disabled={searching || !term.trim()}>
+            <Button
+              onClick={() => runSearch()}
+              disabled={searching || (!term.trim() && selectedTerms.length === 0)}
+            >
               {searching ? <Loader2 className="size-4 animate-spin" /> : "Buscar"}
             </Button>
           </div>
@@ -469,7 +498,7 @@ function RadarGruposPage() {
           <EmptyState
             searching={searching}
             hasSaved={gruposSalvos.length > 0}
-            onSearch={() => term && runSearch()}
+            onSearch={() => runSearch()}
           />
         ) : view === "cards" ? (
           <div className="grid gap-3">
