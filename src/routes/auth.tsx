@@ -39,7 +39,32 @@ function AuthPage() {
     }
   });
   const [busy, setBusy] = useState(false);
+  const [fbBusy, setFbBusy] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+
+  async function handleFacebookLogin() {
+    setFbBusy(true);
+    try {
+      // OAuth do Facebook: se o usuário já estiver logado no navegador, o
+      // Facebook devolve direto para cá (botão "Continuar como ...") sem pedir
+      // e-mail/senha de novo.
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "facebook",
+        options: { redirectTo: window.location.origin },
+      });
+      if (error) throw error;
+      // A página muda para o fluxo do Facebook; nada a desfazer aqui em caso
+      // de sucesso. Em erro, o catch abaixo restaura o botão.
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Erro ao conectar com o Facebook.";
+      setFbBusy(false);
+      if (/enabled|provider|not configure/i.test(message)) {
+        toast.error("O login com Facebook ainda não foi liberado para o Radar. Tente novamente em instantes.");
+      } else {
+        toast.error(message);
+      }
+    }
+  }
 
   async function handleForgotPassword() {
     if (!email) {
@@ -110,7 +135,29 @@ function AuthPage() {
           : "Crie seu acesso à central de grupos."}
       </p>
 
-      <form onSubmit={handleSubmit} className="mt-8 space-y-4">
+      <button
+        type="button"
+        disabled={fbBusy}
+        onClick={handleFacebookLogin}
+        className="mt-6 flex w-full items-center justify-center gap-2.5 rounded-2xl bg-[#1877F2] px-5 py-4 font-semibold text-white shadow-lg shadow-[#1877F2]/30 transition hover:bg-[#166FE5] active:scale-[0.98] disabled:opacity-60"
+      >
+        {fbBusy ? (
+          <Loader2 className="size-5 animate-spin" />
+        ) : (
+          <svg viewBox="0 0 24 24" className="size-5 fill-white" aria-hidden="true">
+            <path d="M22 12.06C22 6.5 17.52 2 12 2S2 6.5 2 12.06C2 17.08 5.66 21.29 10.44 22v-7.03H7.9v-2.9h2.54V9.85c0-2.52 1.5-3.92 3.78-3.92 1.09 0 2.24.2 2.24.2v2.47H15.2c-1.24 0-1.63.77-1.63 1.57v1.9h2.78l-.45 2.9h-2.33V22C18.34 21.29 22 17.08 22 12.06Z" />
+          </svg>
+        )}
+        {mode === "login" ? "Continuar com o Facebook" : "Criar conta com o Facebook"}
+      </button>
+
+      <div className="mt-6 flex items-center gap-3 text-xs uppercase tracking-wide text-muted-foreground">
+        <span className="h-px flex-1 bg-border" />
+        ou use e-mail e senha
+        <span className="h-px flex-1 bg-border" />
+      </div>
+
+      <form onSubmit={handleSubmit} className="mt-6 space-y-4">
         <div>
           <label htmlFor="email" className="text-sm font-medium text-foreground">
             E-mail
