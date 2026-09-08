@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   Box,
   CheckCircle2,
+  Circle,
   ExternalLink,
   FileDown,
   Heart,
@@ -255,10 +256,19 @@ function RadarGruposPage() {
   }
 
   async function toggleFavorito(group: RadarGroup) {
-    await updateEstado.mutateAsync({ grupoId: group.id, patch: { favorito: !group.favorito } });
+    const favorito = !group.favorito;
+    setLastResults((prev) =>
+      prev ? prev.map((g) => (g.id === group.id ? { ...g, favorito } : g)) : prev,
+    );
+    setDetail((prev) => (prev && prev.id === group.id ? { ...prev, favorito } : prev));
+    await updateEstado.mutateAsync({ grupoId: group.id, patch: { favorito } });
   }
 
   async function changeStatus(group: RadarGroup, status: RadarStatus) {
+    setLastResults((prev) =>
+      prev ? prev.map((g) => (g.id === group.id ? { ...g, status } : g)) : prev,
+    );
+    setDetail((prev) => (prev && prev.id === group.id ? { ...prev, status } : prev));
     await updateEstado.mutateAsync({ grupoId: group.id, patch: { status } });
   }
 
@@ -617,6 +627,35 @@ function MemberBadge({ group }: { group: RadarGroup }) {
   );
 }
 
+function MemberChip({
+  group,
+  onChange,
+}: {
+  group: RadarGroup;
+  onChange: (s: RadarStatus) => void;
+}) {
+  const isMember = group.status === "membro";
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        void onChange(isMember ? "salvo" : "membro");
+      }}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+        isMember
+          ? "border-green-300 bg-green-100 text-green-700"
+          : "border-border bg-muted text-muted-foreground hover:border-primary/40",
+      )}
+      title={isMember ? "Desmarcar como membro" : "Marcar que você já é membro deste grupo"}
+    >
+      {isMember ? <CheckCircle2 className="size-3.5" /> : <Circle className="size-3.5" />}
+      {isMember ? "Você é membro" : "Você não é membro"}
+    </button>
+  );
+}
+
 function GroupCard({
   group,
   onOpen,
@@ -674,6 +713,7 @@ function GroupCard({
 
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
           <MemberBadge group={group} />
+          <MemberChip group={group} onChange={onStatus} />
           <Badge className={RADAR_STATUS_CLASSES[group.status]}>
             {RADAR_STATUS_LABELS[group.status]}
           </Badge>
@@ -754,9 +794,12 @@ function TableRow({
         )}
       </td>
       <td className="px-3 py-2.5">
-        <Badge className={RADAR_STATUS_CLASSES[group.status]}>
-          {RADAR_STATUS_LABELS[group.status]}
-        </Badge>
+        <div className="flex flex-col items-start gap-1">
+          <Badge className={RADAR_STATUS_CLASSES[group.status]}>
+            {RADAR_STATUS_LABELS[group.status]}
+          </Badge>
+          <MemberChip group={group} onChange={onStatus} />
+        </div>
       </td>
       <td className="px-3 py-2.5">
         <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
@@ -938,6 +981,21 @@ function GroupsDetailDialog({
                 </option>
               ))}
             </select>
+          </div>
+          <div className="flex items-center justify-between rounded-md border border-border bg-muted/30 px-3 py-2">
+            <div className="flex items-center gap-2 text-sm">
+              <CheckCircle2
+                className={cn(
+                  "size-4",
+                  group.status === "membro" ? "text-green-600" : "text-muted-foreground",
+                )}
+              />
+              {group.status === "membro" ? "Você é membro deste grupo" : "Você não é membro deste grupo"}
+            </div>
+            <Switch
+              checked={group.status === "membro"}
+              onCheckedChange={(c) => void onStatus(c ? "membro" : "salvo")}
+            />
           </div>
           <div className="flex items-center justify-between rounded-md border border-border px-3 py-2">
             <div className="flex items-center gap-2 text-sm">
