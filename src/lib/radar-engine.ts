@@ -16,7 +16,7 @@ const UA =
 
 const MAX_TERMS = 10;
 const MAX_QUERIES = 42; // subrequests to search engines (Cloudflare free: ~50)
-const WALL_BUDGET_MS = 26_000;
+const WALL_BUDGET_MS = 30_000;
 const DELAY_BETWEEN_QUERIES_MS = 950;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -68,42 +68,33 @@ function cleanTitle(title: string): string {
 }
 
 // ---- member-count parsing (snippets / titles, never fabricated) ----
+function parseNum(raw: string): number {
+  let s = raw.trim();
+  if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, "");
+  else if (/^\d{1,3}(,\d{3})+$/.test(s)) s = s.replace(/,/g, "");
+  else s = s.replace(/,/g, ".");
+  return parseFloat(s);
+}
+
 function parseMemberCountText(text: string): { count: number; raw: string } | null {
   if (!text) return null;
   const src = decodeEntities(text).replace(/\s+/g, " ").trim();
-  const milhao =
-    /([\d][\d.,]{0,9})\s*(?:milh[aã]o(?:s)?|milhões)\s*(?:de\s+)?(?:membro|integrantes|pessoas)/i.exec(
-      src,
-    );
-  if (milhao) {
-    const n = parseFloat((milhao[1] ?? "").replace(/\./g, "").replace(",", "."));
-    if (n && n > 0) return { count: Math.round(n * 1_000_000), raw: milhao[0] };
-  }
-  const mil =
-    /([\d][\d.,]{0,9})\s*(?:mil|k)\s*(?:de\s+)?(?:membros|membro|integrantes|membros membros)?/i.exec(
-      src,
-    );
-  if (mil) {
-    const val = (mil[1] ?? "").replace(/\./g, "").replace(",", ".");
-    const n = parseFloat(val);
-    if (n && n > 0) {
-      // only treat as thousands if the token actually says mil/k AND next word is membro-ish
-      if (/mil|k\b/i.test(mil[0])) return { count: Math.round(n * 1000), raw: mil[0] };
-    }
-  }
-  const plain = /([\d][\d.,]{0,9})\s*(?:membros|membro|integrantes|membros)/i.exec(src);
-  if (plain) {
-    const n = parseFloat((plain[1] ?? "").replace(/\./g, "").replace(",", "."));
-    if (n && n > 100) return { count: Math.round(n), raw: plain[0] };
-  }
-  // compact english: "1.2M members", "42k members"
-  const en = /([\d][\d.,]{0,9})\s*([mMkK])\s*members/i.exec(src);
-  if (en) {
-    const n = parseFloat((en[1] ?? "").replace(",", "."));
-    if (n && n > 0) {
-      const mult = (en[2] ?? "k").toLowerCase() === "m" ? 1_000_000 : 1000;
-      return { count: Math.round(n * mult), raw: en[0] };
-    }
+  // Exige palavra de membro logo após o valor (evita falso positivo de preço: "R$ 89 mil")
+  const combo: Array<[number, RegExp]> = [
+    [1_000_000, /(\d[\d.,]{0,9})\s*milh(?:[ãa]o|[oõ]es?)\s*(?:de\s+)?(?:membros?|members|integrantes|pessoas|participantes)/i],
+    [1000, /(\d[\d.,]{0,9})\s*mil\s*(?:de\s+)?(?:membros?|members|integrantes|pessoas|participantes)/i],
+    [1000, /(\d[\d.,]{0,9})\s*([kK])\s*(?:de\s+)?(?:membros?|members|integrantes|pessoas|participantes)/i],
+    [1_000_000, /(\d[\d.,]{0,9})\s*([mM])\s*(?:de\s+)?(?:membros?|members)/i],
+    [1, /(\d[\d.,]{0,11})\s*(?:membros?|members|integrantes|pessoas|participantes)/i],
+  ];
+  for (const [unit, re] of combo) {
+    const m = re.exec(src);
+    if (!m) continue;
+    const n = parseNum(m[1] ?? "");
+    if (!(n > 0)) continue;
+    const count = Math.round(n * unit);
+    if (count < 100) continue;
+    return { count, raw: m[0] };
   }
   return null;
 }
@@ -251,7 +242,7 @@ async function tavilySearch(q: string, key: string): Promise<SerpRow[]> {
         url: cleanUrl(slug),
         title: r.title ?? slug,
         // Tavily content cost be token-heavy; truncate to be safe.
-        snippet: (r.content ?? "").slice(0, 400),
+        snippet: (r.content ?? "").slice(0, 1200),
       });
     }
     return out;
@@ -361,8 +352,8 @@ async function searchQuery(
 // ============================================================
 
 const NICHE_SYNONYMS: Record<string, string[]> = {
-  papelaria: ["encadernação", "agendas personalizadas", "planners", "kits digitais", "papelaria criativa", "caderno personalizado", "scrapbooking", "lembrancinhas", "convites personalizados"],
-  "papelaria personalizada": ["papelaria criativa", "encadernação", "agendas personalizadas", "planners", "kits digitais", "caderno personalizado", "convites personalizados", "lembrancinhas personalizadas"],
+  papelaria: ["encadernação", "agendas personalizadas", "planners", "kits digitais", "papelaria criativa", "caderno personalizado", "scrapbooking", "lembrancinhas", "convites personalizados", "adesivos personalizados", "carimbos personalizados", "canecas personalizadas", "cartões personalizados"],
+  "papelaria personalizada": ["papelaria criativa", "encadernação", "agendas personalizadas", "planners", "kits digitais", "caderno personalizado", "convites personalizados", "lembrancinhas personalizadas", "adesivos personalizados", "carimbos personalizados", "canecas personalizadas", "cartões personalizados"],
   encadernação: ["encadernação artesanal", "caderno artesanal", "agendas artesanais", "papelaria artesanal", "livreto artesanal"],
   "agendas personalizadas": ["agendas", "planners", "agendinhas", "caderno personalizado", "diário personalizado"],
   planners: ["planners", "planejamento", "menina organizada", "bullet journal"],
@@ -393,8 +384,8 @@ function queryTemplates(term: string): string[] {
   const t = term.trim();
   return [
     `site:facebook.com/groups "${t}"`,
-    `"${t}" facebook grupo brasil`,
-    `"${t}" facebook "mil membros" pouco`,
+    `"${t}" facebook grupo membros`,
+    `"${t}" mil membros facebook grupo`,
   ];
 }
 
@@ -419,11 +410,57 @@ type Discovered = {
   term: string;
 };
 
+type PersistResult = { groupIds: string[]; inserted: number; rows: any[] | null };
+
+// Batch upsert via RPC: insert + merge + attach + load em UM subrequest
+// (limite de ~50 subrequests por invocação no Worker era estourado com a
+// via avulsa: 30 queries Tavily + select + insert + N merges + attach + load).
 async function persistGroups(
   userId: string,
   groups: Discovered[],
   terms: string[],
-): Promise<{ groupIds: string[]; inserted: number; rowMap: Map<string, any> }> {
+): Promise<PersistResult> {
+  if (groups.length === 0) return { groupIds: [], inserted: 0, rows: [] };
+  const admin = await getAdmin();
+  try {
+    const { data, error } = await admin.rpc("radar_upsert_groups", {
+      p_user: userId,
+      p_terms: terms,
+      p_groups: groups.map((g) => ({
+        slug: g.slug,
+        url: g.url,
+        name: g.name,
+        description: g.description,
+        term: g.term,
+        member_count: g.member_count,
+        member_raw: g.member_raw,
+        is_public: g.is_public,
+        source: g.source,
+      })),
+    });
+    if (!error && data) {
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+      const rows: any[] = Array.isArray(parsed?.groups) ? parsed.groups : [];
+      return {
+        groupIds: rows.map((r: any) => r.id),
+        inserted: typeof parsed?.inserted === "number" ? parsed.inserted : rows.length,
+        rows,
+      };
+    }
+    if (error) console.error("[radar] batch rpc:", error.message);
+  } catch (err) {
+    console.error("[radar] batch rpc threw:", err);
+  }
+  // Fallback legado (via avulsa do TS) caso a função RPC ainda não exista no
+  // banco — funcional, porém mais lento e sujeito ao limite de subrequests.
+  return persistGroupsLegacy(userId, groups, terms);
+}
+
+async function persistGroupsLegacy(
+  userId: string,
+  groups: Discovered[],
+  terms: string[],
+): Promise<PersistResult> {
   const admin = await getAdmin();
   const io = new Date().toISOString();
   const urls = [...new Set(groups.map((g) => g.url))];
@@ -525,7 +562,7 @@ async function persistGroups(
         if (error) console.error("[radar] attach:", error.message);
       });
   }
-  return { groupIds: uniq, inserted, rowMap: byUrl };
+  return { groupIds: uniq, inserted, rows: null };
 }
 
 async function loadGroupsByIds(userId: string, ids: string[]): Promise<any[]> {
@@ -537,7 +574,10 @@ async function loadGroupsByIds(userId: string, ids: string[]): Promise<any[]> {
     .eq("radar_grupo_usuario.user_id", userId)
     .in("id", ids)
     .order("member_count", { ascending: false, nullsFirst: false });
-  if (error) return [];
+  if (error) {
+    console.error("[radar] loadGroupsByIds error:", error.message, { ids: ids.length });
+    return [];
+  }
   return (data ?? []).map((r: any) => ({
     ...r,
     status: r.radar_grupo_usuario?.[0]?.status ?? "salvo",
@@ -591,57 +631,87 @@ export const radarSearch = createServerFn({ method: "POST" })
     let sourcesOk = 0;
     let budgetHit = false;
 
+    // Todos os pares (termo, consulta) — templates focados em grupos/membros,
+    // inclusive os grandes (snippets com "X mil/milhões de membros").
+    const tasks: Array<{ term: string; q: string }> = [];
     for (const term of terms) {
-      if (Date.now() - t0 > WALL_BUDGET_MS || budget.queries <= 0) {
-        budgetHit = true;
-        break;
+      for (const q of queryTemplates(term)) tasks.push({ term, q });
+    }
+    const wallDeadline = t0 + WALL_BUDGET_MS;
+
+    async function runTask(task: { term: string; q: string }) {
+      if (budget.queries <= 0 || Date.now() > wallDeadline) return;
+      const { rows, ok, failures } = await searchQuery(task.q, budget, tavilyKey, braveKey);
+      if (ok && rows.length > 0) sourcesOk++;
+      else if (failures.length) sourceFailures.push(...failures);
+      for (const r of rows) {
+        const cur = discovered.get(r.slug);
+        const mc = parseMemberCountText(r.snippet || r.title);
+        const pub = detectPublic(r.snippet || r.title);
+        if (!cur) {
+          discovered.set(r.slug, {
+            slug: r.slug,
+            url: r.url,
+            name: cleanTitle(r.title) || r.slug,
+            description: r.snippet || null,
+            member_count: mc?.count ?? null,
+            member_raw: mc?.raw ?? null,
+            is_public: pub,
+            source: sourceName,
+            term: task.term,
+          });
+        } else {
+          if (mc && cur.member_count == null) {
+            cur.member_count = mc.count;
+            cur.member_raw = mc.raw;
+          }
+          if (pub != null && cur.is_public == null) cur.is_public = pub;
+          if (!cur.name || cur.name === cur.slug) cur.name = cleanTitle(r.title) || cur.name;
+          if (!cur.description && r.snippet) cur.description = r.snippet;
+        }
       }
-      for (const q of tavilyKey ? [queryTemplates(term)[0] ?? ""] : queryTemplates(term)) {
-        if (Date.now() - t0 > WALL_BUDGET_MS || budget.queries <= 0) {
+    }
+
+    if (tavilyKey) {
+      // Tavily estável e sem rate-limit: 3 consultas simultâneas respeitando o
+      // orçamento de subrequests (~42 < limite de 50).
+      let idx = 0;
+      const worker = async () => {
+        while (idx < tasks.length) {
+          if (budget.queries <= 0 || Date.now() > wallDeadline) {
+            budgetHit = true;
+            break;
+          }
+          const task = tasks[idx++];
+          if (!task) break;
+          await runTask(task);
+        }
+      };
+      await Promise.all([worker(), worker(), worker()]);
+    } else {
+      for (const task of tasks) {
+        if (budget.queries <= 0 || Date.now() > wallDeadline) {
           budgetHit = true;
           break;
         }
-        const { rows, ok, failures } = await searchQuery(q, budget, tavilyKey, braveKey);
-        if (ok && rows.length > 0) sourcesOk++;
-        else if (failures.length) sourceFailures.push(...failures);
-        for (const r of rows) {
-          const cur = discovered.get(r.slug);
-          const mc = parseMemberCountText(r.snippet || r.title);
-          const pub = detectPublic(r.snippet || r.title);
-          if (!cur) {
-            discovered.set(r.slug, {
-              slug: r.slug,
-              url: r.url,
-              name: cleanTitle(r.title) || r.slug,
-              description: r.snippet || null,
-              member_count: mc?.count ?? null,
-              member_raw: mc?.raw ?? null,
-              is_public: pub,
-              source: sourceName,
-              term,
-            });
-          } else {
-            if (mc && cur.member_count == null) {
-              cur.member_count = mc.count;
-              cur.member_raw = mc.raw;
-            }
-            if (pub != null && cur.is_public == null) cur.is_public = pub;
-            if (!cur.name || cur.name === cur.slug) cur.name = cleanTitle(r.title) || cur.name;
-            if (!cur.description && r.snippet) cur.description = r.snippet;
-          }
-        }
+        await runTask(task);
         // Reset slashes between queries to lower anomaly risk (só DDG)
-        if (budget.queries > 0 && !tavilyKey && !braveKey) await sleep(DELAY_BETWEEN_QUERIES_MS);
+        if (budget.queries > 0 && !braveKey) await sleep(DELAY_BETWEEN_QUERIES_MS);
       }
     }
 
     const all = [...discovered.values()];
     let groupIds: string[] = [];
     let inserted = 0;
+    let groups: RadarGroup[] = [];
     try {
       const persisted = await persistGroups(userId, all, terms);
       groupIds = persisted.groupIds;
       inserted = persisted.inserted;
+      if (persisted.rows && persisted.rows.length > 0) {
+        // Via RPC o banco já devolve as linhas prontas (sem subrequest extra).
+        groups = persisted.rows as unknown as RadarGroup[];
+      }
     } catch (err) {
       console.error("[radar] radarSearch persist:", err);
       return { success: false, error: "Não foi possível salvar os grupos encontrados. Tente novamente." };
@@ -670,19 +740,21 @@ export const radarSearch = createServerFn({ method: "POST" })
       console.error("[radar] radarSearch history:", err);
     }
 
-    let groups: RadarGroup[];
-    try {
-      groups = (await loadGroupsByIds(userId, groupIds)) as RadarGroup[];
-    } catch (err) {
-      console.error("[radar] radarSearch load:", err);
-      return { success: false, error: "Não foi possível carregar os resultados salvos. Tente novamente." };
-    }
+    // Fallback legado: sem rows do RPC, recarrega do banco (1 request).
     if (groups.length === 0 && groupIds.length > 0) {
-      console.error(
-        "[radar] radarSearch: groups persisted but none reloaded",
-        { group_ids: groupIds.length, discovered: all.length },
-      );
-      return { success: false, error: "Não foi possível carregar os resultados salvos. Tente novamente." };
+      try {
+        groups = (await loadGroupsByIds(userId, groupIds)) as RadarGroup[];
+      } catch (err) {
+        console.error("[radar] radarSearch load:", err);
+        return { success: false, error: "Não foi possível carregar os resultados salvos. Tente novamente." };
+      }
+      if (groups.length === 0) {
+        console.error(
+          "[radar] radarSearch: groups persisted but none reloaded",
+          { group_ids: groupIds.length, discovered: all.length },
+        );
+        return { success: false, error: "Não foi possível carregar os resultados salvos. Tente novamente." };
+      }
     }
     const confirmed = groups.filter((g) => g.member_count != null).length;
 
@@ -737,10 +809,12 @@ export const radarImport = createServerFn({ method: "POST" })
     }
     let groupIds: string[] = [];
     let inserted = 0;
+    let list: any[] = [];
     try {
       const persisted = await persistGroups(userId, groups, ["importado"]);
       groupIds = persisted.groupIds;
       inserted = persisted.inserted;
+      if (persisted.rows && persisted.rows.length > 0) list = persisted.rows;
     } catch (err) {
       console.error("[radar] radarImport persist:", err);
       return { success: false, error: "Não foi possível importar os grupos agora. Tente novamente." };
@@ -749,12 +823,13 @@ export const radarImport = createServerFn({ method: "POST" })
       console.error("[radar] radarImport: urls given but none persisted", { urls: groups.length });
       return { success: false, error: "Não foi possível salvar os links importados agora. Tente novamente." };
     }
-    let list;
-    try {
-      list = await loadGroupsByIds(userId, groupIds);
-    } catch (err) {
-      console.error("[radar] radarImport load:", err);
-      return { success: false, error: "Não foi possível carregar os grupos importados. Tente novamente." };
+    if (list.length === 0 && groupIds.length > 0) {
+      try {
+        list = await loadGroupsByIds(userId, groupIds);
+      } catch (err) {
+        console.error("[radar] radarImport load:", err);
+        return { success: false, error: "Não foi possível carregar os grupos importados. Tente novamente." };
+      }
     }
     const confirmed = list.filter((g) => g.member_count != null).length;
     return {
