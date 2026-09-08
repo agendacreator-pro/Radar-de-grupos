@@ -189,6 +189,12 @@ function RadarGruposPage() {
       toast.warning(
         "Nenhum grupo encontrado agora — as fontes de busca podem estar bloqueando temporariamente. Tente novamente em instantes.",
       );
+    } else if (res.total_unique === 0) {
+      toast.info(
+        res.filtered_dropped && res.filtered_dropped > 0
+          ? `Foram encontrados ${res.filtered_dropped} grupos, mas nenhum era do seu nicho — tente termos mais específicos.`
+          : "Nenhum grupo do seu nicho encontrado — tente outros termos.",
+      );
     } else {
       toast.success(
         `Busca concluída: ${res.total_unique} grupos (${res.confirmed_count} com membros confirmados).`,

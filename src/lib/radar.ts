@@ -81,6 +81,7 @@ export type RadarSearchResult = {
   total_cache_new: number;
   confirmed_count: number;
   unconfirmed_count: number;
+  filtered_dropped?: number;
   groups: RadarGroup[];
 };
 

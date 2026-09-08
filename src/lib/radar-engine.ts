@@ -414,6 +414,43 @@ function queryTemplates(term: string): string[] {
   ];
 }
 
+// ---- relevance filter (keeps only groups tied to the niche) ----
+// Um grupo descoberto só entra na lista se o nome ou a descrição dele contém
+// o nicho digitado pelo usuário ou um dos sinônimos do nicho. Isso derruba
+// grupos aleatórios que um buscador retorna junto, mas que não têm a ver com
+// a busca ("Vendas geral", comunidades de outros temas, etc.).
+// Quando o usuário digita uma frase composta ("papelaria personalizada"),
+// exige-se correspondência com uma chave multipalavra (mais específica) —
+// derruba lojas/assuntos parecidos, mas de outro nicho.
+function buildRelevanceKeys(
+  rawTerms: string[],
+  expanded: string[],
+): { pool: string[]; strictOnly: boolean } {
+  const pool = new Set<string>();
+  for (const t of [...rawTerms, ...expanded]) {
+    const k = t.toLowerCase().trim();
+    if (k.length < 3) continue;
+    pool.add(k);
+  }
+  const strictOnly = rawTerms.some((t) => {
+    const k = t.toLowerCase().trim();
+    return k.includes(" ") && k.length >= 3;
+  });
+  return { pool: [...pool], strictOnly };
+}
+
+function isRelevantToNiche(
+  g: { name: string; description: string | null },
+  keys: { pool: string[]; strictOnly: boolean },
+): boolean {
+  const hay = `${g.name} ${g.description ?? ""}`.toLowerCase();
+  if (keys.strictOnly) {
+    const strictKeys = keys.pool.filter((k) => k.includes(" "));
+    return strictKeys.some((k) => hay.includes(k));
+  }
+  return keys.pool.some((k) => hay.includes(k));
+}
+
 // ============================================================
 // Persistence (defensive; failures are logged and reported)
 // ============================================================
@@ -732,11 +769,20 @@ export const radarSearch = createServerFn({ method: "POST" })
     }
 
     const all = [...discovered.values()];
+    const relevanceKeys = buildRelevanceKeys(rawTerms, terms);
+    const allCount = all.length;
+    const relevant = all.filter((g) => isRelevantToNiche(g, relevanceKeys));
+    if (relevant.length < allCount) {
+      console.log(
+        `[radar] relevância: ${relevant.length}/${allCount} grupos mantidos (${allCount - relevant.length} fora do nicho descartados)`,
+        { terms: rawTerms.slice(0, 5) },
+      );
+    }
     let groupIds: string[] = [];
     let inserted = 0;
     let groups: RadarGroup[] = [];
     try {
-      const persisted = await persistGroups(userId, all, terms);
+      const persisted = await persistGroups(userId, relevant, terms);
       groupIds = persisted.groupIds;
       inserted = persisted.inserted;
       if (persisted.rows && persisted.rows.length > 0) {
@@ -747,14 +793,22 @@ export const radarSearch = createServerFn({ method: "POST" })
       console.error("[radar] radarSearch persist:", err);
       return { success: false, error: "Não foi possível salvar os grupos encontrados. Tente novamente." };
     }
-    // Se havia grupos descobertos e nenhum foi salvo, algo falhou no banco —
-    // não mascarar como "0 grupos".
-    if (all.length > 0 && groupIds.length === 0) {
+    // Se havia grupos relevantes descobertos e nenhum foi salvo, algo falhou
+    // no banco — não mascarar como "0 grupos".
+    if (relevant.length > 0 && groupIds.length === 0) {
       console.error(
         "[radar] radarSearch: groups discovered but none persisted",
-        { discovered: all.length, source_failures: sourceFailures.slice(0, 8) },
+        { discovered: relevant.length, source_failures: sourceFailures.slice(0, 8) },
       );
       return { success: false, error: "Os grupos foram encontrados, mas não foi possível salvá-los agora. Tente novamente." };
+    }
+    // Se o filtro de relevância descartou tudo, informar com clareza —
+    // incluindo quantos foram encontrados porém fora do nicho.
+    if (relevant.length === 0 && allCount > 0) {
+      console.log(
+        "[radar] radarSearch: filtro de relevância zerou os resultados",
+        { discovered: allCount, terms: rawTerms.slice(0, 5) },
+      );
     }
 
     // history
@@ -795,6 +849,7 @@ export const radarSearch = createServerFn({ method: "POST" })
       total_cache_new: inserted,
       confirmed_count: confirmed,
       unconfirmed_count: groups.length - confirmed,
+      filtered_dropped: allCount - relevant.length,
       groups,
       terms_used: terms,
       sources_ok: sourcesOk,
