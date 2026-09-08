@@ -35,8 +35,13 @@ Frontend:
 
 ```bash
 npm run build
-cd .output
-npx wrangler deploy --name radar-de-grupos --var SUPABASE_URL=https://<ref>.supabase.co --var SUPABASE_PUBLISHABLE_KEY=<sb_publishable_...>
+npx wrangler deploy -c wrangler.jsonc
+```
+
+As vars plain-text (`SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`) estão em `wrangler.jsonc` (raiz), para o deploy ser determinístico. O secret `SUPABASE_SERVICE_ROLE_KEY` é setado uma vez:
+
+```bash
+npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY --name radar-de-grupos
 ```
 
 Edge function:

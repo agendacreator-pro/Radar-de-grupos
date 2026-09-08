@@ -114,3 +114,22 @@ export const ddgSnippetStructure = createServerFn({ method: "GET" }).handler(asy
     tail: html.slice(Math.max(0, html.length - 15000)),
   };
 });
+
+/** Presença das env vars do worker (SÓ booleanos — nunca expõe valores/secrets). */
+export const envStatus = createServerFn({ method: "GET" }).handler(async () => {
+  const names = [
+    "SUPABASE_URL",
+    "SUPABASE_PUBLISHABLE_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "BRAVE_API_KEY",
+  ] as const;
+  const status: Record<string, boolean> = {};
+  for (const name of names) {
+    try {
+      status[name] = Boolean((process.env as Record<string, string | undefined>)[name]);
+    } catch {
+      status[name] = false;
+    }
+  }
+  return status;
+});

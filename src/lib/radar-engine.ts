@@ -279,7 +279,8 @@ async function searchQuery(
     const page = await attempt();
     if (page.blocked || page.status === 202) {
       failures.push(`ddg ${page.status}`);
-      await sleep(1600 + Math.random() * 800);
+      // Backoff mais longo reduz a cascata de desafios (202) do DDG.
+      await sleep(2400 + Math.random() * 1400);
       continue;
     }
     if (!page.ok) {
@@ -502,7 +503,13 @@ export const radarSearch = createServerFn({ method: "POST" })
   .validator((d: RadarSearchInput) => d)
   .handler(async ({ data }) => {
     const t0 = Date.now();
-    const userId = await verifyUser(data.token);
+    let userId: string | null;
+    try {
+      userId = await verifyUser(data.token);
+    } catch (err) {
+      console.error("[radar] radarSearch verifyUser:", err);
+      return { success: false, error: "Erro de configuração do servidor. Tente novamente em instantes." };
+    }
     if (!userId) return { success: false, error: "Sessão expirada. Entre novamente." };
 
     const rawTerms = [...new Set([data.q, ...(data.terms ?? [])].map((t) => String(t??"").trim()).filter(Boolean))];
@@ -563,7 +570,25 @@ export const radarSearch = createServerFn({ method: "POST" })
     }
 
     const all = [...discovered.values()];
-    const { groupIds, inserted } = await persistGroups(userId, all, terms);
+    let groupIds: string[] = [];
+    let inserted = 0;
+    try {
+      const persisted = await persistGroups(userId, all, terms);
+      groupIds = persisted.groupIds;
+      inserted = persisted.inserted;
+    } catch (err) {
+      console.error("[radar] radarSearch persist:", err);
+      return { success: false, error: "Não foi possível salvar os grupos encontrados. Tente novamente." };
+    }
+    // Se havia grupos descobertos e nenhum foi salvo, algo falhou no banco —
+    // não mascarar como "0 grupos".
+    if (all.length > 0 && groupIds.length === 0) {
+      console.error(
+        "[radar] radarSearch: groups discovered but none persisted",
+        { discovered: all.length, source_failures: sourceFailures.slice(0, 8) },
+      );
+      return { success: false, error: "Os grupos foram encontrados, mas não foi possível salvá-los agora. Tente novamente." };
+    }
 
     // history
     try {
@@ -575,9 +600,24 @@ export const radarSearch = createServerFn({ method: "POST" })
         total_resultados: all.length,
         total_grupos: groupIds.length,
       });
-    } catch {}
+    } catch (err) {
+      console.error("[radar] radarSearch history:", err);
+    }
 
-    const groups = (await loadGroupsByIds(userId, groupIds)) as RadarGroup[];
+    let groups: RadarGroup[];
+    try {
+      groups = (await loadGroupsByIds(userId, groupIds)) as RadarGroup[];
+    } catch (err) {
+      console.error("[radar] radarSearch load:", err);
+      return { success: false, error: "Não foi possível carregar os resultados salvos. Tente novamente." };
+    }
+    if (groups.length === 0 && groupIds.length > 0) {
+      console.error(
+        "[radar] radarSearch: groups persisted but none reloaded",
+        { group_ids: groupIds.length, discovered: all.length },
+      );
+      return { success: false, error: "Não foi possível carregar os resultados salvos. Tente novamente." };
+    }
     const confirmed = groups.filter((g) => g.member_count != null).length;
 
     return {
@@ -600,7 +640,13 @@ export type RadarImportInput = { urls: string[]; token: string };
 export const radarImport = createServerFn({ method: "POST" })
   .validator((d: RadarImportInput) => d)
   .handler(async ({ data }) => {
-    const userId = await verifyUser(data.token);
+    let userId: string | null;
+    try {
+      userId = await verifyUser(data.token);
+    } catch (err) {
+      console.error("[radar] radarImport verifyUser:", err);
+      return { success: false, error: "Erro de configuração do servidor. Tente novamente em instantes." };
+    }
     if (!userId) return { success: false, error: "Sessão expirada. Entre novamente." };
     const urls = (data.urls ?? []).map((u) => String(u ?? "").trim()).filter(Boolean);
     if (urls.length === 0) return { success: false, error: "Cole pelo menos um link." };
@@ -623,8 +669,27 @@ export const radarImport = createServerFn({ method: "POST" })
         term: "importado",
       });
     }
-    const { groupIds, inserted } = await persistGroups(userId, groups, ["importado"]);
-    const list = await loadGroupsByIds(userId, groupIds);
+    let groupIds: string[] = [];
+    let inserted = 0;
+    try {
+      const persisted = await persistGroups(userId, groups, ["importado"]);
+      groupIds = persisted.groupIds;
+      inserted = persisted.inserted;
+    } catch (err) {
+      console.error("[radar] radarImport persist:", err);
+      return { success: false, error: "Não foi possível importar os grupos agora. Tente novamente." };
+    }
+    if (groups.length > 0 && groupIds.length === 0) {
+      console.error("[radar] radarImport: urls given but none persisted", { urls: groups.length });
+      return { success: false, error: "Não foi possível salvar os links importados agora. Tente novamente." };
+    }
+    let list;
+    try {
+      list = await loadGroupsByIds(userId, groupIds);
+    } catch (err) {
+      console.error("[radar] radarImport load:", err);
+      return { success: false, error: "Não foi possível carregar os grupos importados. Tente novamente." };
+    }
     const confirmed = list.filter((g) => g.member_count != null).length;
     return {
       success: true,
@@ -641,7 +706,13 @@ export type RadarRecheckInput = { url: string; token: string };
 export const radarRecheck = createServerFn({ method: "POST" })
   .validator((d: RadarRecheckInput) => d)
   .handler(async ({ data }) => {
-    const userId = await verifyUser(data.token);
+    let userId: string | null;
+    try {
+      userId = await verifyUser(data.token);
+    } catch (err) {
+      console.error("[radar] radarRecheck verifyUser:", err);
+      return { success: false, error: "Erro de configuração do servidor. Tente novamente em instantes." };
+    }
     if (!userId) return { success: false, error: "Sessão expirada. Entre novamente." };
     const slug = extractSlug(String(data.url ?? ""));
     if (!slug) return { success: false, error: "Link de grupo inválido." };

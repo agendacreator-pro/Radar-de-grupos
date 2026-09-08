@@ -159,9 +159,8 @@ function RadarGruposPage() {
       (err: unknown) => {
         clearStage();
         setSearching(false);
-        toast.error(
-          `Falha ao buscar (${err instanceof Error ? err.message : String(err)}). Entre novamente e tente outra vez.`,
-        );
+        console.error("[radar] falha ao buscar:", err);
+        toast.error("Falha ao buscar agora. Tente novamente em instantes.");
         return null;
       },
     );
@@ -176,9 +175,15 @@ function RadarGruposPage() {
     setLastResults(res.groups);
     setLastMeta(res);
     queryClient.invalidateQueries({ queryKey: ["radar-grupos"] });
-    toast.success(
-      `Busca concluída: ${res.total_unique} grupos (${res.confirmed_count} com membros confirmados).`,
-    );
+    if (res.total_unique === 0 && res.sources_ok === 0) {
+      toast.warning(
+        "Nenhum grupo encontrado agora — as fontes de busca podem estar bloqueando temporariamente. Tente novamente em instantes.",
+      );
+    } else {
+      toast.success(
+        `Busca concluída: ${res.total_unique} grupos (${res.confirmed_count} com membros confirmados).`,
+      );
+    }
   }
 
   useEffect(
@@ -196,13 +201,23 @@ function RadarGruposPage() {
     if (urls.length === 0) return;
     setSearching(true);
     setStage("importando");
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    const token = session?.access_token ?? "";
-    const res = await radarImport({ data: { urls, token } });
+    const session0 = await supabase.auth.getSession().catch((err: unknown) => {
+      console.error("[radar] falha ao obter sessão:", err);
+      throw err;
+    });
+    const token = session0.data.session?.access_token ?? "";
+    let res: Awaited<ReturnType<typeof radarImport>>;
+    try {
+      res = await radarImport({ data: { urls, token } });
+    } catch (err) {
+      setSearching(false);
+      console.error("[radar] falha ao importar:", err);
+      toast.error("Falha ao importar agora. Tente novamente em instantes.");
+      return;
+    }
     setSearching(false);
     if (!res.success || res.error) {
+      console.error("[radar] importação rejeitada:", res.error);
       toast.error(res.error ?? "Falha ao importar os links.");
       return;
     }
@@ -218,8 +233,16 @@ function RadarGruposPage() {
       data: { session },
     } = await supabase.auth.getSession();
     const token = session?.access_token ?? "";
-    const res = await radarRecheck({ data: { url: group.url, token } });
+    let res: Awaited<ReturnType<typeof radarRecheck>>;
+    try {
+      res = await radarRecheck({ data: { url: group.url, token } });
+    } catch (err) {
+      console.error("[radar] falha ao verificar:", err);
+      toast.error("Falha ao verificar agora. Tente novamente em instantes.");
+      return;
+    }
     if (!res.success || !res.group) {
+      console.error("[radar] verificação rejeitada:", res.error);
       toast.error(res.error ?? "Falha ao verificar.");
       return;
     }

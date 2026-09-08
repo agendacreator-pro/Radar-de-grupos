@@ -1,0 +1,21 @@
+// Radar de Grupos — deploy config do worker.
+// Vars plain-text (SUPABASE_URL é pública; publishable key é feita para ir ao
+// cliente). Segredos (SUPABASE_SERVICE_ROLE_KEY, opcional BRAVE_API_KEY)
+// ficam no Cloudflare via: npx wrangler secret put -n radar-de-grupos
+// Deploy: npm run build; npx wrangler deploy -c wrangler.jsonc
+{
+  "name": "radar-de-grupos",
+  "main": ".output/server/index.mjs",
+  "compatibility_date": "2026-09-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "no_bundle": true,
+  "rules": [{ "type": "ESModule", "globs": ["**/*.mjs", "**/*.js"] }],
+  "assets": {
+    "binding": "ASSETS",
+    "directory": ".output/public"
+  },
+  "vars": {
+    "SUPABASE_URL": "https://yhjmulicddyclnqmodlk.supabase.co",
+    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_9--LmFEWqBcfsE7Ppitneg_81_eK1yb"
+  }
+}

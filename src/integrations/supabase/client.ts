@@ -39,9 +39,11 @@ function createSupabaseClient() {
       ...(!SUPABASE_URL ? ['SUPABASE_URL'] : []),
       ...(!SUPABASE_PUBLISHABLE_KEY ? ['SUPABASE_PUBLISHABLE_KEY'] : []),
     ];
-    const message = `Missing Supabase environment variable(s): ${missing.join(', ')}. Connect Supabase in Lovable Cloud.`;
-    console.error(`[Supabase] ${message}`);
-    throw new Error(message);
+    console.error(
+      `[Supabase] Missing environment variable(s): ${missing.join(', ')}. ` +
+        `Client: VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY (build-time). Server: SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY (Worker vars).`,
+    );
+    throw new Error('Serviço de dados temporariamente indisponível. Tente novamente mais tarde.');
   }
 
   return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {

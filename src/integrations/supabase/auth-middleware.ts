@@ -41,9 +41,11 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
         ...(!SUPABASE_URL ? ['SUPABASE_URL'] : []),
         ...(!SUPABASE_PUBLISHABLE_KEY ? ['SUPABASE_PUBLISHABLE_KEY'] : []),
       ];
-      const message = `Missing Supabase environment variable(s): ${missing.join(', ')}. Connect Supabase in Lovable Cloud.`;
-      console.error(`[Supabase] ${message}`);
-      throw new Error(message);
+      console.error(
+        `[Supabase] Missing environment variable(s): ${missing.join(', ')}. ` +
+          `Expected as Cloudflare Worker plain-text vars (SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY).`,
+      );
+      throw new Error('Serviço de dados temporariamente indisponível. Tente novamente mais tarde.');
     }
     
     const request = getRequest();
