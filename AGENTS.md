@@ -29,9 +29,9 @@
 - **Engine de descoberta no Worker** (`src/lib/radar-engine.ts`): server functions `radarSearch`/`radarImport`/`radarRecheck` que rodam no Worker (egresso CF). Fontes: Brave (se `BRAVE_API_KEY`) → DDG html → DDG lite → Bing; parse de contagem de membros em snippets. `painel.grupos.tsx` usa o engine (passa o JWT do usuário na chamada; grava via service role). Corrige a busca que retornava 0 grupos (egresso do Supabase bloqueado).
 - **Botão Buscar funciona com somente termos extras** (campo principal vazio): `runSearch` valida `term || selectedTerms.length > 0`; botão habilita com termos selecionados.
 - `tsc --noEmit` passa; `vite build` gera `.output` (preset cloudflare-module).
+- **Worker deployado** (`026afb7c`) com secret `SUPABASE_SERVICE_ROLE_KEY` + vars `SUPABASE_URL`/`SUPABASE_PUBLISHABLE_KEY`. Verificado em produção via `/dbg`: DDG html/lite retornam grupos reais (10 URLs p/ "papelaria personalizada"); Facebook direto bloqueado (400) → contagem de membros vem de snippets.
 
 ### Pending / To verify
-- **Deploy pendente**: setar secret `SUPABASE_SERVICE_ROLE_KEY` no worker e redeployar (senão o engine falha "Missing Supabase environment variable").
 - Criar usuário de teste (sign-up aberto; se e-mail de confirmação bloquear, criar via admin com `email_confirm: true` ou desativar confirmação no projeto).
-- Testar busca real no `/painel/grupos` (DDG/Bing vivos) e afinar: orçamento de tempo (~26s wall, 42 subqueries, delay 950ms), `BRAVE_API_KEY` opcional, mais templates de query se necessário.
+- Testar busca real no RLP `/painel/grupos` (login + Buscar) e afinar: orçamento de tempo (~26s wall, 42 subqueries, delay 950ms), `BRAVE_API_KEY` opcional (minha qualidade de contagem de membros em snippets), mais templates de query se necessário.
 - UI: seleção de agência para serviços de envio NÃO se aplica (radar não usa envio).
