@@ -30,7 +30,7 @@ declare
 begin
   for g in select * from jsonb_array_elements(coalesce(p_groups, '[]'::jsonb)) loop
     insert into public.radar_grupos (
-      fb_id, url, name, description, categoria, member_count, member_raw,
+      fb_id, url, name, description, categoria, country, member_count, member_raw,
       member_checked_at, is_public, fontes, derivado_de
     ) values (
       case when g->>'slug' ~ '^[0-9]+$' then g->>'slug' else null end,
@@ -38,6 +38,7 @@ begin
       coalesce(nullif(btrim(coalesce(g->>'name', ''), ''), ''), g->>'slug'),
       nullif(g->>'description', ''),
       case when g->>'term' is not null and g->>'term' not in ('', 'importado') then coalesce(p_terms[1], g->>'term') else null end,
+      case when g->>'country' is null or g->>'country' = '' then 'BR' else upper(btrim(g->>'country')) end,
       case when g->>'member_count' is null or g->>'member_count' = '' then null else (g->>'member_count')::bigint end,
       nullif(g->>'member_raw', ''),
       case when g->>'member_count' is not null and g->>'member_count' <> '' then now() else null end,

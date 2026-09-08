@@ -41,6 +41,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
   formatMemberCount,
+  formatCountry,
+  COUNTRY_LABELS,
   RADAR_STATUS_CLASSES,
   RADAR_STATUS_LABELS,
   RADAR_SUGGESTED_TERMS,
@@ -106,6 +108,7 @@ function RadarGruposPage() {
   const [visibilidade, setVisibilidade] = useState<Visibilidade>("todos");
   const [sort, setSort] = useState<Sort>("maiores");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("todos");
+  const [countryFilter, setCountryFilter] = useState<string>("todos");
 
   const [view, setView] = useState<"cards" | "tabela">("cards");
   const [detail, setDetail] = useState<RadarGroup | null>(null);
@@ -114,12 +117,18 @@ function RadarGruposPage() {
 
   const baseGroups = lastResults && lastResults.length > 0 ? lastResults : gruposSalvos;
 
+  const countryOptions = useMemo(() => {
+    const present = new Set(baseGroups.map((g) => g.country));
+    return [...present].sort();
+  }, [baseGroups]);
+
   const filtered = useMemo(() => {
     let list = baseGroups;
     if (minMembers)
       list = list.filter((g) => g.member_count != null && g.member_count >= minMembers);
     if (visibilidade === "publico") list = list.filter((g) => g.is_public === true);
     if (statusFilter !== "todos") list = list.filter((g) => g.status === statusFilter);
+    if (countryFilter !== "todos") list = list.filter((g) => g.country === countryFilter);
     const arr = [...list];
     if (sort === "maiores") {
       arr.sort((a, b) => (b.member_count ?? -1) - (a.member_count ?? -1));
@@ -134,7 +143,7 @@ function RadarGruposPage() {
       });
     }
     return arr;
-  }, [baseGroups, minMembers, visibilidade, statusFilter, sort]);
+  }, [baseGroups, minMembers, visibilidade, statusFilter, countryFilter, sort]);
 
   async function runSearch(preset?: string) {
     const termo = (preset ?? term).trim();
@@ -462,6 +471,21 @@ function RadarGruposPage() {
               </select>
             </div>
             <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-muted-foreground">País:</span>
+              <select
+                value={countryFilter}
+                onChange={(e) => setCountryFilter(e.target.value)}
+                className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+              >
+                <option value="todos">Todos</option>
+                {countryOptions.map((c) => (
+                  <option key={c} value={c}>
+                    {formatCountry(c)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
               <span className="text-xs font-medium text-muted-foreground">Meu status:</span>
               <select
                 value={statusFilter}
@@ -555,6 +579,7 @@ function RadarGruposPage() {
                     <th className="px-3 py-2 font-medium">Grupo</th>
                     <th className="px-3 py-2 font-medium">Membros</th>
                     <th className="px-3 py-2 font-medium">Visibilidade</th>
+                    <th className="px-3 py-2 font-medium">País</th>
                     <th className="px-3 py-2 font-medium">Status</th>
                     <th className="px-3 py-2 font-medium">Ações</th>
                   </tr>
@@ -682,6 +707,9 @@ function GroupCard({
               >
                 {group.is_public == null ? "Desconhecido" : group.is_public ? "Público" : "Privado"}
               </Badge>
+              <Badge variant="outline" className="shrink-0 border-primary/30 bg-primary/5 text-primary">
+                {formatCountry(group.country)}
+              </Badge>
             </div>
             {group.categoria && (
               <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
@@ -792,6 +820,11 @@ function TableRow({
             {group.is_public ? "Público" : "Privado"}
           </Badge>
         )}
+      </td>
+      <td className="px-3 py-2.5">
+        <Badge variant="outline" className="border-primary/30 bg-primary/5 text-primary">
+          {formatCountry(group.country)}
+        </Badge>
       </td>
       <td className="px-3 py-2.5">
         <div className="flex flex-col items-start gap-1">
@@ -937,6 +970,9 @@ function GroupsDetailDialog({
                 : group.is_public
                   ? "Grupo público"
                   : "Grupo privado"}
+            </Badge>
+            <Badge variant="outline" className="border-primary/30 bg-primary/5 text-primary">
+              {formatCountry(group.country)}
             </Badge>
             <Badge className={RADAR_STATUS_CLASSES[group.status]}>
               {RADAR_STATUS_LABELS[group.status]}

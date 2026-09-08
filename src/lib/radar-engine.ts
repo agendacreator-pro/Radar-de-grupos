@@ -67,6 +67,31 @@ function cleanTitle(title: string): string {
     .trim();
 }
 
+const COUNTRY_MAP: Record<string, string> = {
+  br: "BR", brasil: "BR", brazil: "BR", brazilian: "BR",
+  pt: "PT", portugal: "PT", portuguese: "PT",
+  ao: "AO", angola: "AO", angolan: "AO",
+  mz: "MZ", mocambique: "MZ", mozambique: "MZ", "moçambique": "MZ",
+  cv: "CV", "cabo verde": "CV", "cape verde": "CV",
+  tl: "TL", timor: "TL", "timor leste": "TL",
+  gw: "GW", "guine bissau": "GW", "guiné bissau": "GW",
+  st: "ST", "sao tome": "ST", "são tomé": "ST",
+  gq: "GQ", "guine equatorial": "GQ", "guiné equatorial": "GQ",
+};
+
+function detectCountry(url: string, snippet: string, title: string): string {
+  const localeM = url.match(/[?&]locale=([a-z]{2})_(?:[A-Z]{2})?/i);
+  if (localeM) {
+    const code = COUNTRY_MAP[(localeM[1] ?? "").toLowerCase()];
+    if (code) return code;
+  }
+  const text = `${title} ${snippet}`.toLowerCase();
+  for (const [key, code] of Object.entries(COUNTRY_MAP)) {
+    if (text.includes(key) && key.length > 2) return code;
+  }
+  return "BR";
+}
+
 // ---- member-count parsing (snippets / titles, never fabricated) ----
 function parseNum(raw: string): number {
   let s = raw.trim();
@@ -408,6 +433,7 @@ type Discovered = {
   is_public: boolean | null;
   source: string;
   term: string;
+  country: string;
 };
 
 type PersistResult = { groupIds: string[]; inserted: number; rows: any[] | null };
@@ -436,6 +462,7 @@ async function persistGroups(
         member_raw: g.member_raw,
         is_public: g.is_public,
         source: g.source,
+        country: g.country,
       })),
     });
     if (!error && data) {
@@ -494,6 +521,7 @@ async function persistGroupsLegacy(
         member_raw: g.member_raw,
         member_checked_at: g.member_count != null ? io : null,
         is_public: g.is_public,
+        country: g.country ?? "BR",
         fontes: [g.source],
         derivado_de: [...new Set([g.term, ...terms].filter(Boolean))],
       };
@@ -648,6 +676,7 @@ export const radarSearch = createServerFn({ method: "POST" })
         const cur = discovered.get(r.slug);
         const mc = parseMemberCountText(r.snippet || r.title);
         const pub = detectPublic(r.snippet || r.title);
+        const country = detectCountry(r.url, r.snippet || "", r.title);
         if (!cur) {
           discovered.set(r.slug, {
             slug: r.slug,
@@ -659,6 +688,7 @@ export const radarSearch = createServerFn({ method: "POST" })
             is_public: pub,
             source: sourceName,
             term: task.term,
+            country,
           });
         } else {
           if (mc && cur.member_count == null) {
@@ -668,6 +698,7 @@ export const radarSearch = createServerFn({ method: "POST" })
           if (pub != null && cur.is_public == null) cur.is_public = pub;
           if (!cur.name || cur.name === cur.slug) cur.name = cleanTitle(r.title) || cur.name;
           if (!cur.description && r.snippet) cur.description = r.snippet;
+          if (cur.country === "BR" && country !== "BR") cur.country = country;
         }
       }
     }
@@ -805,6 +836,7 @@ export const radarImport = createServerFn({ method: "POST" })
         is_public: null,
         source: "importado",
         term: "importado",
+        country: detectCountry(cleanUrl(slug), "", slug),
       });
     }
     let groupIds: string[] = [];

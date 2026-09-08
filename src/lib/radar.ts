@@ -21,6 +21,7 @@ export type RadarGroup = {
   name: string;
   description: string | null;
   categoria: string | null;
+  country: string;
   member_count: number | null;
   member_raw: string | null;
   is_public: boolean | null;
@@ -56,6 +57,22 @@ export const RADAR_STATUS_CLASSES: Record<RadarStatus, string> = {
   membro: "bg-green-100 text-green-700",
   nao_interesse: "bg-red-100 text-destructive",
 };
+
+export const COUNTRY_LABELS: Record<string, string> = {
+  BR: "Brasil",
+  PT: "Portugal",
+  AO: "Angola",
+  MZ: "Moçambique",
+  CV: "Cabo Verde",
+  GW: "Guiné-Bissau",
+  ST: "São Tomé e Príncipe",
+  TL: "Timor-Leste",
+  GQ: "Guiné Equatorial",
+};
+
+export function formatCountry(code: string): string {
+  return COUNTRY_LABELS[code] ?? code;
+}
 
 export type RadarSearchResult = {
   success: boolean;
@@ -166,6 +183,7 @@ export function exportGroupsCsv(groups: RadarGroup[], filename = "radar-de-grupo
     "Nome",
     "Link",
     "Categoria",
+    "País",
     "Membros",
     "Visibilidade",
     "Status",
@@ -183,6 +201,7 @@ export function exportGroupsCsv(groups: RadarGroup[], filename = "radar-de-grupo
       esc(g.name),
       esc(g.url),
       esc(g.categoria ?? ""),
+      esc(formatCountry(g.country)),
       g.member_count != null ? String(g.member_count) : "Não confirmado",
       esc(g.is_public == null ? "" : g.is_public ? "Público" : "Privado"),
       esc(RADAR_STATUS_LABELS[g.status] ?? g.status),
@@ -208,6 +227,7 @@ export function exportGroupsXls(groups: RadarGroup[], filename = "radar-de-grupo
     "Nome",
     "Link",
     "Categoria",
+    "País",
     "Membros",
     "Visibilidade",
     "Status",
@@ -223,6 +243,7 @@ export function exportGroupsXls(groups: RadarGroup[], filename = "radar-de-grupo
         <td>${esc(g.name)}</td>
         <td>${esc(g.url)}</td>
         <td>${esc(g.categoria ?? "")}</td>
+        <td>${esc(formatCountry(g.country))}</td>
         <td>${g.member_count != null ? String(g.member_count) : "Não confirmado"}</td>
         <td>${g.is_public == null ? "" : g.is_public ? "Público" : "Privado"}</td>
         <td>${esc(RADAR_STATUS_LABELS[g.status] ?? g.status)}</td>
