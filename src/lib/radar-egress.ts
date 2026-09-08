@@ -122,6 +122,7 @@ export const envStatus = createServerFn({ method: "GET" }).handler(async () => {
     "SUPABASE_PUBLISHABLE_KEY",
     "SUPABASE_SERVICE_ROLE_KEY",
     "BRAVE_API_KEY",
+    "TAVILY_API_KEY",
   ] as const;
   const status: Record<string, boolean> = {};
   for (const name of names) {

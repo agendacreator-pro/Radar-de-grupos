@@ -5,7 +5,8 @@ import type { RadarGroup } from "@/lib/radar";
 // Radar de Grupos — mecanismo de descoberta (roda no Worker).
 // Egresso: Cloudflare Workers (as fontes bloqueiam o Supabase).
 // Fontes: DuckDuckGo (html + lite, com fallback/retry) e,
-// opcionalmente, Brave Search API quando BRAVE_API_KEY estiver setada.
+// opcionalmente, Tavily (TAVILY_API_KEY) ou Brave (BRAVE_API_KEY) quando
+// configurados (Tavily tem precedência: é a fonte mais limpa para LLMs).
 // Contagem de membros: extraída de snippets públicos dos buscadores
 // (nunca inventada); quando indisponível, permanece "não confirmado".
 // ============================================================
@@ -221,6 +222,46 @@ function parseBing(html: string): SerpRow[] {
   return out;
 }
 
+async function tavilySearch(q: string, key: string): Promise<SerpRow[]> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 14_000);
+  try {
+    const res = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      signal: controller.signal,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        api_key: key,
+        query: q,
+        search_depth: "basic",
+        max_results: 20,
+        include_domains: ["facebook.com"],
+      }),
+    });
+    if (!res.ok) return [];
+    const j = (await res.json()) as { results?: Array<{ url: string; title?: string; content?: string }> };
+    const out: SerpRow[] = [];
+    const seen = new Set<string>();
+    for (const r of j.results ?? []) {
+      const slug = extractSlug(r.url);
+      if (!slug || seen.has(slug)) continue;
+      seen.add(slug);
+      out.push({
+        slug,
+        url: cleanUrl(slug),
+        title: r.title ?? slug,
+        // Tavily content cost be token-heavy; truncate to be safe.
+        snippet: (r.content ?? "").slice(0, 400),
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function braveSearch(q: string, key: string): Promise<SerpRow[]> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 14_000);
@@ -254,12 +295,20 @@ async function braveSearch(q: string, key: string): Promise<SerpRow[]> {
 async function searchQuery(
   query: string,
   budget: { queries: number },
+  tavilyKey: string | null,
   braveKey: string | null,
 ): Promise<{ rows: SerpRow[]; ok: boolean; failures: string[] }> {
   if (budget.queries <= 0) return { rows: [], ok: true, failures: ["budget"] };
   const enc = encodeURIComponent(query);
 
-  // Brave first if configured (cleanest data)
+  // Tavily first if configured (cleanest for LLMs, avoids DDG 202s)
+  if (tavilyKey) {
+    budget.queries--;
+    const rows = await tavilySearch(query, tavilyKey);
+    return { rows, ok: true, failures: [] };
+  }
+
+  // Brave next if configured (clean data)
   if (braveKey) {
     budget.queries--;
     const rows = await braveSearch(query, braveKey);
@@ -386,65 +435,80 @@ async function persistGroups(
   const groupIds: string[] = [];
   let inserted = 0;
 
+  const toInsert: Discovered[] = [];
+  const toMerge: Array<{ cur: any; g: Discovered }> = [];
   for (const g of groups) {
     const cur = byUrl.get(g.url);
-    const fbId = /^\d+$/.test(g.slug) ? g.slug : null;
-    if (!cur) {
-      const r = await admin
-        .from("radar_grupos")
-        .insert({
-          fb_id: fbId,
-          url: g.url,
-          name: g.name || g.slug,
-          description: g.description,
-          categoria: terms[0] && g.term !== "importado" ? g.term : null,
-          member_count: g.member_count,
-          member_raw: g.member_raw,
-          member_checked_at: g.member_count != null ? io : null,
-          is_public: g.is_public,
-          fontes: [g.source],
-          derivado_de: [...new Set([g.term, ...terms].filter(Boolean))],
-        })
-        .select("id,url,name,description,categoria,member_count,member_raw,is_public,fontes,derivado_de,member_checked_at,created_at,updated_at")
-        .single();
-      if (r.error) continue;
-      byUrl.set(g.url, r.data as any);
-      groupIds.push((r.data as any).id);
-      inserted++;
+    if (!cur) toInsert.push(g);
+    else toMerge.push({ cur, g });
+  }
+
+  // Bulk insert (1 request) — evita "Too many subrequests" com dezenas de grupos.
+  if (toInsert.length > 0) {
+    const rows = toInsert.map((g) => {
+      const fbId = /^\d+$/.test(g.slug) ? g.slug : null;
+      return {
+        fb_id: fbId,
+        url: g.url,
+        name: g.name || g.slug,
+        description: g.description,
+        categoria: terms[0] && g.term !== "importado" ? g.term : null,
+        member_count: g.member_count,
+        member_raw: g.member_raw,
+        member_checked_at: g.member_count != null ? io : null,
+        is_public: g.is_public,
+        fontes: [g.source],
+        derivado_de: [...new Set([g.term, ...terms].filter(Boolean))],
+      };
+    });
+    const { data: insData, error: insErr } = await admin
+      .from("radar_grupos")
+      .insert(rows)
+      .select("id,url,name,description,categoria,member_count,member_raw,is_public,fontes,derivado_de,member_checked_at,created_at,updated_at");
+    if (insErr) {
+      console.error("[radar] bulk insert:", insErr.message);
     } else {
-      const patch: Record<string, unknown> = { updated_at: io };
-      const fonts = new Set<string>([...((cur.fontes ?? []) as string[]), g.source]);
-      const tAll = new Set<string>([...((cur.derivado_de ?? []) as string[]), ...terms.filter(Boolean)]);
-      let changed = false;
-      if (JSON.stringify(cur.fontes ?? []) !== JSON.stringify([...fonts])) {
-        patch["fontes"] = [...fonts];
-        changed = true;
+      for (const r of insData ?? []) {
+        groupIds.push((r as any).id);
+        inserted++;
       }
-      if (JSON.stringify(cur.derivado_de ?? []) !== JSON.stringify([...tAll])) {
-        patch["derivado_de"] = [...tAll];
-        changed = true;
-      }
-      if (!cur.name && g.name) {
-        (patch as any).name = g.name;
-        changed = true;
-      }
-      if (g.member_count != null && (cur.member_count == null || !cur.member_raw)) {
-        patch["member_count"] = g.member_count;
-        patch["member_raw"] = g.member_raw;
-        patch["member_checked_at"] = io;
-        changed = true;
-      }
-      if (g.description && !cur.name) (patch as any).description = g.description;
-      if (changed) {
-        await admin.from("radar_grupos").update(patch as any).eq("id", cur.id).then(({ error }) => {
-          if (error) console.error("[radar] update:", error.message);
-        });
-      }
-      groupIds.push(cur.id);
     }
   }
 
-  // attach user rows
+  // Merges puntuais (raros após a primeira população) — 1 request apenas quando algo muda.
+  for (const { cur, g } of toMerge) {
+    const patch: Record<string, unknown> = { updated_at: io };
+    const fonts = new Set<string>([...((cur.fontes ?? []) as string[]), g.source]);
+    const tAll = new Set<string>([...((cur.derivado_de ?? []) as string[]), ...terms.filter(Boolean)]);
+    let changed = false;
+    if (JSON.stringify(cur.fontes ?? []) !== JSON.stringify([...fonts])) {
+      patch["fontes"] = [...fonts];
+      changed = true;
+    }
+    if (JSON.stringify(cur.derivado_de ?? []) !== JSON.stringify([...tAll])) {
+      patch["derivado_de"] = [...tAll];
+      changed = true;
+    }
+    if (!cur.name && g.name) {
+      (patch as any).name = g.name;
+      changed = true;
+    }
+    if (g.member_count != null && (cur.member_count == null || !cur.member_raw)) {
+      patch["member_count"] = g.member_count;
+      patch["member_raw"] = g.member_raw;
+      patch["member_checked_at"] = io;
+      changed = true;
+    }
+    if (g.description && !cur.name) (patch as any).description = g.description;
+    if (changed) {
+      await admin.from("radar_grupos").update(patch as any).eq("id", cur.id).then(({ error }) => {
+        if (error) console.error("[radar] update:", error.message);
+      });
+    }
+    groupIds.push(cur.id);
+  }
+
+  // attach user rows (bulk)
   const uniq = [...new Set(groupIds)];
   const { data: mine } = await admin
     .from("radar_grupo_usuario")
@@ -517,7 +581,9 @@ export const radarSearch = createServerFn({ method: "POST" })
       return { success: false, error: "Informe um termo ou pelo menos uma referência." };
     }
     const terms = expandTerms(rawTerms);
+    const tavilyKey = (process.env["TAVILY_API_KEY"] as string | undefined) || null;
     const braveKey = (process.env["BRAVE_API_KEY"] as string | undefined) || null;
+    const sourceName = tavilyKey ? "tavily" : braveKey ? "brave" : "duckduckgo";
 
     const budget = { queries: MAX_QUERIES };
     const discovered = new Map<string, Discovered>();
@@ -530,12 +596,12 @@ export const radarSearch = createServerFn({ method: "POST" })
         budgetHit = true;
         break;
       }
-      for (const q of queryTemplates(term)) {
+      for (const q of tavilyKey ? [queryTemplates(term)[0] ?? ""] : queryTemplates(term)) {
         if (Date.now() - t0 > WALL_BUDGET_MS || budget.queries <= 0) {
           budgetHit = true;
           break;
         }
-        const { rows, ok, failures } = await searchQuery(q, budget, braveKey);
+        const { rows, ok, failures } = await searchQuery(q, budget, tavilyKey, braveKey);
         if (ok && rows.length > 0) sourcesOk++;
         else if (failures.length) sourceFailures.push(...failures);
         for (const r of rows) {
@@ -551,7 +617,7 @@ export const radarSearch = createServerFn({ method: "POST" })
               member_count: mc?.count ?? null,
               member_raw: mc?.raw ?? null,
               is_public: pub,
-              source: braveKey ? "brave" : "duckduckgo",
+              source: sourceName,
               term,
             });
           } else {
@@ -564,8 +630,8 @@ export const radarSearch = createServerFn({ method: "POST" })
             if (!cur.description && r.snippet) cur.description = r.snippet;
           }
         }
-        // Reset slashes between queries to lower anomaly risk
-        if (budget.queries > 0 && !braveKey) await sleep(DELAY_BETWEEN_QUERIES_MS);
+        // Reset slashes between queries to lower anomaly risk (só DDG)
+        if (budget.queries > 0 && !tavilyKey && !braveKey) await sleep(DELAY_BETWEEN_QUERIES_MS);
       }
     }
 
