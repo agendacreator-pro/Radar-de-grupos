@@ -19,9 +19,9 @@ const MAX_QUERIES = 42; // subrequests to search engines (Cloudflare free: ~50)
 const WALL_BUDGET_MS = 30_000;
 const DELAY_BETWEEN_QUERIES_MS = 950;
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function decodeEntities(s: string): string {
+export function decodeEntities(s: string): string {
   return s
     .replace(/&#x27;/g, "'")
     .replace(/&#39;/g, "'")
@@ -59,7 +59,7 @@ function cleanUrl(slug: string): string {
   return `https://www.facebook.com/groups/${slug}`;
 }
 
-function cleanTitle(title: string): string {
+export function cleanTitle(title: string): string {
   return decodeEntities(title)
     .replace(/\s*\|\s*Facebook\s*$/i, "")
     .replace(/facebook\s*$/i, "")
@@ -388,7 +388,7 @@ const NICHE_SYNONYMS: Record<string, string[]> = {
   "papelaria criativa": ["papelaria personalizada", "encadernação", "kits digitais", "agendas personalizadas"],
 };
 
-function expandTerms(raw: string[]): string[] {
+export function expandTerms(raw: string[]): string[] {
   const out = new Set<string>();
   for (const t of raw) {
     const key = t.toLowerCase().trim();
@@ -455,7 +455,7 @@ function isRelevantToNiche(
 // Persistence (defensive; failures are logged and reported)
 // ============================================================
 
-async function getAdmin() {
+export async function getAdmin() {
   const mod = await import("@/integrations/supabase/client.server");
   return mod.supabaseAdmin;
 }
@@ -654,7 +654,7 @@ async function loadGroupsByIds(userId: string, ids: string[]): Promise<any[]> {
   }));
 }
 
-async function verifyUser(token: string): Promise<string | null> {
+export async function verifyUser(token: string): Promise<string | null> {
   if (!token) return null;
   const admin = await getAdmin();
   const { data, error } = await admin.auth.getUser(token);

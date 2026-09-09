@@ -14,6 +14,7 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as DbgRouteImport } from './routes/dbg'
 import { Route as PainelRouteImport } from './routes/painel'
 import { Route as PainelGruposRouteImport } from './routes/painel.grupos'
+import { Route as PainelOportunidadesRouteImport } from './routes/painel.oportunidades'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -40,6 +41,11 @@ const PainelGruposRoute = PainelGruposRouteImport.update({
   path: '/grupos',
   getParentRoute: () => PainelRoute,
 } as any)
+const PainelOportunidadesRoute = PainelOportunidadesRouteImport.update({
+  id: '/oportunidades',
+  path: '/oportunidades',
+  getParentRoute: () => PainelRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -47,6 +53,7 @@ export interface FileRoutesByFullPath {
   '/dbg': typeof DbgRoute
   '/painel': typeof PainelRouteWithChildren
   '/painel/grupos': typeof PainelGruposRoute
+  '/painel/oportunidades': typeof PainelOportunidadesRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -54,6 +61,7 @@ export interface FileRoutesByTo {
   '/dbg': typeof DbgRoute
   '/painel': typeof PainelRouteWithChildren
   '/painel/grupos': typeof PainelGruposRoute
+  '/painel/oportunidades': typeof PainelOportunidadesRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -62,13 +70,33 @@ export interface FileRoutesById {
   '/dbg': typeof DbgRoute
   '/painel': typeof PainelRouteWithChildren
   '/painel/grupos': typeof PainelGruposRoute
+  '/painel/oportunidades': typeof PainelOportunidadesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/dbg' | '/painel' | '/painel/grupos'
+  fullPaths:
+    | '/'
+    | '/auth'
+    | '/dbg'
+    | '/painel'
+    | '/painel/grupos'
+    | '/painel/oportunidades'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/dbg' | '/painel' | '/painel/grupos'
-  id: '__root__' | '/' | '/auth' | '/dbg' | '/painel' | '/painel/grupos'
+  to:
+    | '/'
+    | '/auth'
+    | '/dbg'
+    | '/painel'
+    | '/painel/grupos'
+    | '/painel/oportunidades'
+  id:
+    | '__root__'
+    | '/'
+    | '/auth'
+    | '/dbg'
+    | '/painel'
+    | '/painel/grupos'
+    | '/painel/oportunidades'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -115,15 +143,24 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PainelGruposRouteImport
       parentRoute: typeof PainelRoute
     }
+    '/painel/oportunidades': {
+      id: '/painel/oportunidades'
+      path: '/oportunidades'
+      fullPath: '/painel/oportunidades'
+      preLoaderRoute: typeof PainelOportunidadesRouteImport
+      parentRoute: typeof PainelRoute
+    }
   }
 }
 
 interface PainelRouteChildren {
   PainelGruposRoute: typeof PainelGruposRoute
+  PainelOportunidadesRoute: typeof PainelOportunidadesRoute
 }
 
 const PainelRouteChildren: PainelRouteChildren = {
   PainelGruposRoute: PainelGruposRoute,
+  PainelOportunidadesRoute: PainelOportunidadesRoute,
 }
 
 const PainelRouteWithChildren =
