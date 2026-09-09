@@ -25,7 +25,7 @@ const WALL_BUDGET_MS = 30_000;
 const DELAY_BETWEEN_QUERIES_MS = 950;
 
 type FetchedPage = { ok: boolean; status: number; html: string; blocked: boolean };
-type RawRow = { href: string; title: string; snippet: string };
+type RawRow = { href: string; title: string; snippet: string; published?: string | null };
 type PostRef = { slug: string; slugKey: string; postId: string };
 
 const MAX_TARGET_GROUPS = 10;
@@ -206,15 +206,23 @@ async function tavilyPosts(q: string, key: string, days?: number): Promise<RawRo
     });
     if (!res.ok) return [];
     const j = (await res.json()) as {
-      results?: Array<{ url: string; title?: string; content?: string }>;
+      results?: Array<{ url: string; title?: string; content?: string; published_date?: string }>;
     };
     const out: RawRow[] = [];
     for (const r of j.results ?? []) {
       if (!extractPostInfo(r.url)) continue;
+      let published: string | null = null;
+      if (r.published_date) {
+        const d = new Date(r.published_date);
+        if (isFinite(+d) && d.getTime() <= Date.now() + 36e5 && d.getTime() >= Date.now() - 4 * 365 * 864e5) {
+          published = d.toISOString();
+        }
+      }
       out.push({
         href: r.url,
         title: cleanTitle(r.title ?? ""),
         snippet: (r.content ?? "").slice(0, 1200),
+        published,
       });
     }
     return out;
@@ -238,12 +246,17 @@ async function bravePosts(q: string, key: string, freshness?: string): Promise<R
     );
     if (!res.ok) return [];
     const j = (await res.json()) as {
-      web?: { results?: Array<{ url: string; title: string; description?: string }> };
+      web?: { results?: Array<{ url: string; title: string; description?: string; age?: string }> };
     };
     const out: RawRow[] = [];
     for (const r of j.web?.results ?? []) {
       if (!extractPostInfo(r.url)) continue;
-      out.push({ href: r.url, title: cleanTitle(r.title), snippet: r.description ?? "" });
+      out.push({
+        href: r.url,
+        title: cleanTitle(r.title),
+        snippet: r.description ?? "",
+        published: providerAgeToIso(r.age),
+      });
     }
     return out;
   } catch {
@@ -332,6 +345,28 @@ function buildFreshness(recentDays: number): Freshness | null {
   return { df, brave, tavilyDays };
 }
 
+/** Bruto "age" do Brave ("4d", "1w", "3 months ago"...)→ data ISO real (idade de rastreio, não data de publicação). */
+function providerAgeToIso(age: string | undefined | null): string | null {
+  if (!age) return null;
+  const now = Date.now();
+  const t = new Date(now);
+  const m = age.match(
+    /(\d+[.,]?\d*)\s*(minutes?|hrs?|hours?|h|days?|d|weeks?|w|months?|mon|years?|y)\b/i,
+  );
+  if (m) {
+    const n = Number(m[1]);
+    const u = (m[2] ?? "").toLowerCase();
+    if (/^min/.test(u)) t.setMinutes(t.getMinutes() - n);
+    else if (/^h/.test(u)) t.setHours(t.getHours() - n);
+    else if (/^(d|days?)$/.test(u)) t.setDate(t.getDate() - n);
+    else if (/^(w|weeks?)$/.test(u)) t.setDate(t.getDate() - n * 7);
+    else if (/^(months?|mon|mos)$/.test(u)) t.setMonth(t.getMonth() - n);
+    else t.setFullYear(t.getFullYear() - n);
+    if (t.getTime() <= now + 36e5 && t.getTime() >= now - 4 * 365 * 864e5) return t.toISOString();
+  }
+  return null;
+}
+
 const MONTHS_PT = [
   "janeiro", "fevereiro", "março", "abril", "maio", "junho",
   "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
@@ -389,17 +424,7 @@ function parsePostDate(title: string, snippet: string): string | null {
     }
   }
 
-  // 3) "mês de AAAA" (sem dia)
-  m = text.match(/\b([a-zç]+)\s+de\s+(\d{4})\b/i);
-  if (m) {
-    const mi = pluckMonth(m[1] ?? "", MONTHS_PT, MONTHS_PT_ABBR);
-    if (mi !== null) {
-      const d = new Date(Date.UTC(Number(m[2]), mi, 1));
-      if (validRecent(d)) return d.toISOString();
-    }
-  }
-
-  // 4) Relativos em português
+  // 3) Relativos em português (formato que o próprio Facebook usa para exibir tempos)
   const ptUnits: Array<[RegExp, number]> = [
     [/\b(?:há|faz)\s+(\d+)[.,]?(\d*)\s*(min(?:utos?)?|h|hora(?:s)?)\b/i, 0],
     [/\b(?:há|faz)\s+(\d+)(\.\d+)?\s+dias?\b/i, 1],
@@ -460,20 +485,6 @@ function parsePostDate(title: string, snippet: string): string | null {
       else t.setFullYear(t.getFullYear() - 1);
     } else if (kind === 6) t.setDate(t.getDate() - 1);
     if (validRecent(t)) return t.toISOString();
-  }
-
-  // 6) Marcadores de comentário do Facebook ("Maria · 8y") → antigo parece "8y".
-  m = text.match(/\b(\d{1,2})\s*y\.?\b/i);
-  if (m && Number(m[1]) >= 1 && Number(m[1]) <= 12) {
-    const d = new Date(now.getTime());
-    d.setFullYear(d.getFullYear() - Number(m[1]));
-    if (validRecent(d)) return d.toISOString();
-  }
-  m = text.match(/\b(\d{1,2})\s*m\.?\b/i);
-  if (m && Number(m[1]) >= 1 && Number(m[1]) <= 12) {
-    const d = new Date(now.getTime());
-    d.setMonth(d.getMonth() - Number(m[1]));
-    if (validRecent(d)) return d.toISOString();
   }
 
   return null;
@@ -564,7 +575,12 @@ function buildCandidate(
   }
   const score = Math.min(100, result.score + (text.includes(context.term) ? 4 : 0));
   const grupoUrl = normalizePostUrl(ref);
-  const data = parsePostDate(row.title, row.snippet);
+  let data = parsePostDate(row.title, row.snippet);
+  let confirmada = false;
+  if (row.published) {
+    data = row.published;
+    confirmada = true;
+  }
   return {
     post_url: grupoUrl,
     post_id: ref.postId,
@@ -579,7 +595,7 @@ function buildCandidate(
     fonte: context.targeted ? `${context.source}/grupos-salvos` : context.source,
     titulo: titleText.slice(0, 200),
     data_publicacao: data,
-    publicacao_confirmada: false,
+    publicacao_confirmada: confirmada,
     key: postDedupeKey(ref),
   };
 }
@@ -761,8 +777,9 @@ export const oportunidadesSearch = createServerFn({ method: "POST" })
     let antigasIgnoradas = 0;
     if (freshness) {
       const antes = oportunidades.length;
+      // Só filtra datas REAIS (confirmadas por provedor/página); estimativas não descartadas.
       oportunidades = oportunidades.filter((o) => {
-        if (!o.data_publicacao || o.publicacao_confirmada) return true;
+        if (!o.publicacao_confirmada || !o.data_publicacao) return true;
         return Date.parse(o.data_publicacao) >= recentCutoff;
       });
       antigasIgnoradas = antes - oportunidades.length;
@@ -883,6 +900,7 @@ export const oportunidadesSearch = createServerFn({ method: "POST" })
       anuncios_ignorados: anuncios.length,
       antigas_ignoradas: antigasIgnoradas,
       recent_mode: !!freshness,
+      confirmadas: oportunidades.filter((o) => o.publicacao_confirmada).length,
       oportunidades: rows,
       sources_ok: sourcesOk,
       source_failures: [...new Set(sourceFailures)].slice(0, 8),

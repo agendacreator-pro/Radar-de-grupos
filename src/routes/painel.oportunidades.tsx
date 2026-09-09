@@ -60,6 +60,7 @@ export const Route = createFileRoute("/painel/oportunidades")({
 type TipoFilter = "todos" | Oportunidade["tipo_intencao"];
 type StatusFilter = "todos" | OportunidadeStatus;
 type DataFilter = "todas" | "1d" | "7d" | "30d";
+type AnoFilter = "todos" | string;
 type Sort = "score" | "recentes";
 
 type MetaResult = {
@@ -70,12 +71,12 @@ type MetaResult = {
   anuncios_ignorados: number;
   antigas_ignoradas: number;
   recent_mode: boolean;
+  confirmadas: number;
   sources_ok: number;
   target_mode: boolean;
 };
 
 const DATA_FILTERS: { value: DataFilter; label: string }[] = [
-  { value: "todas", label: "Todas" },
   { value: "1d", label: "últimas 24h" },
   { value: "7d", label: "7 dias" },
   { value: "30d", label: "30 dias" },
@@ -113,6 +114,7 @@ function RadarOportunidadesPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("todos");
   const [tipoFilter, setTipoFilter] = useState<TipoFilter>("todos");
   const [dataFilter, setDataFilter] = useState<DataFilter>("todas");
+  const [anoFilter, setAnoFilter] = useState<AnoFilter>("todos");
   const [sort, setSort] = useState<Sort>("score");
 
   const stageTimer = useRef<number | null>(null);
@@ -120,18 +122,45 @@ function RadarOportunidadesPage() {
 
   const selectedGroups = grupos.filter((g) => selectedGroupIds.includes(g.id));
 
-  const filtered = useMemo(() => {
+  const years = useMemo(() => {
+    const base = view === "busca" && lastResults ? lastResults : salvos;
+    const set = new Set<string>();
+    for (const o of base) {
+      if (o.verificado && o.data_publicacao) {
+        set.add(String(new Date(o.data_publicacao).getUTCFullYear()));
+      }
+    }
+    return [...set].sort((a, b) => Number(b) - Number(a));
+  }, [salvos, lastResults, view]);
+
+  const viewData = useMemo(() => {
     const base = view === "busca" && lastResults ? lastResults : salvos;
     let list = base;
     if (statusFilter !== "todos") list = list.filter((o) => o.status === statusFilter);
     if (tipoFilter !== "todos") list = list.filter((o) => o.tipo_intencao === tipoFilter);
-    if (dataFilter !== "todas") {
-      const cutoff = Date.now() - Number(dataFilter.slice(0, -1)) * 86400000;
-      list = list.filter((o) => {
-        const date = o.data_publicacao ?? o.data_encontrada;
-        return new Date(date).getTime() >= cutoff;
-      });
+
+    // Filtros de data REAL: só contam datas confirmadas (provedor/página). Não chutamos nada.
+    const hasPeriod = dataFilter !== "todas" || anoFilter !== "todos";
+    let semData: Oportunidade[] = [];
+    if (hasPeriod) {
+      const cutoff =
+        dataFilter !== "todas" ? Date.now() - Number(dataFilter.slice(0, -1)) * 86400000 : 0;
+      const naJanela: Oportunidade[] = [];
+      const fora: Oportunidade[] = [];
+      for (const o of list) {
+        const dataReal = o.verificado && o.data_publicacao ? new Date(o.data_publicacao) : null;
+        const okPeriodo =
+          dataFilter === "todas" || (dataReal !== null && dataReal.getTime() >= cutoff);
+        const okAno =
+          anoFilter === "todos" ||
+          (dataReal !== null &&
+            String(dataReal.getUTCFullYear()) === anoFilter);
+        (okPeriodo && okAno ? naJanela : fora).push(o);
+      }
+      list = naJanela;
+      semData = fora;
     }
+
     const arr = [...list];
     if (sort === "score") {
       arr.sort((a, b) => {
@@ -142,12 +171,16 @@ function RadarOportunidadesPage() {
         return b.score - a.score;
       });
     } else {
-      arr.sort((a, b) =>
-        (b.data_publicacao ?? b.data_encontrada).localeCompare(a.data_publicacao ?? a.data_encontrada),
-      );
+      arr.sort((a, b) => {
+        const da =
+          a.verificado && a.data_publicacao ? a.data_publicacao : a.data_encontrada;
+        const db =
+          b.verificado && b.data_publicacao ? b.data_publicacao : b.data_encontrada;
+        return db.localeCompare(da);
+      });
     }
-    return arr;
-  }, [salvos, lastResults, view, statusFilter, tipoFilter, dataFilter, sort]);
+    return { arr, semData, hasPeriod };
+  }, [salvos, lastResults, view, statusFilter, tipoFilter, dataFilter, anoFilter, sort]);
 
   const stats = useMemo(() => {
     const total = salvos.length;
@@ -171,6 +204,7 @@ function RadarOportunidadesPage() {
     setLastResults(null);
     setLastMeta(null);
     setView("busca");
+    setAnoFilter("todos");
     setStage("buscando");
     const stages = ["buscando", "analisando", "salvando"];
     let i = 0;
@@ -219,7 +253,10 @@ function RadarOportunidadesPage() {
         return {
           ...ro,
           id: ro.id || `b-${o.post_url}`,
-          verificado: ro.verificado ?? false,
+          verificado:
+            (o as { publicacao_confirmada?: boolean }).publicacao_confirmada ??
+            ro.verificado ??
+            false,
           data_encontrada: ro.data_encontrada ?? new Date().toISOString(),
           data_respondida: ro.data_respondida ?? null,
           created_at: ro.created_at ?? new Date().toISOString(),
@@ -257,8 +294,10 @@ function RadarOportunidadesPage() {
     await updateStatus.mutateAsync({ id: o.id, status });
   }
 
-  const buyers = filtered.filter((o) => o.tipo_intencao !== "anuncio_vendedor");
-  const sellers = filtered.filter((o) => o.tipo_intencao === "anuncio_vendedor");
+  const buyers = viewData.arr.filter((o) => o.tipo_intencao !== "anuncio_vendedor");
+  const sellers = viewData.arr.filter((o) => o.tipo_intencao === "anuncio_vendedor");
+  const semBuyers = viewData.semData.filter((o) => o.tipo_intencao !== "anuncio_vendedor");
+  const semSellers = viewData.semData.filter((o) => o.tipo_intencao === "anuncio_vendedor");
 
   return (
     <div className="px-5 pb-10 pt-5">
@@ -360,7 +399,7 @@ function RadarOportunidadesPage() {
             <button
               type="button"
               onClick={() => setRecentOnly((v) => !v)}
-              title="Restringe a busca às publicações das últimas 7 dias"
+              title="Pede às fontes (Tavily/Brave/DDG) somente resultados recentes; datas confirmadas antigas são ocultadas"
               className={cn(
                 "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
                 recentOnly
@@ -372,7 +411,7 @@ function RadarOportunidadesPage() {
             </button>
             {recentOnly && (
               <span className="text-[11px] text-muted-foreground">
-                Publicações antigas confirmadas são ocultadas dos resultados.
+                Fontes de busca restritas aos últimos 7 dias; nada é descartado por data chutada.
               </span>
             )}
           </div>
@@ -445,6 +484,11 @@ function RadarOportunidadesPage() {
               {lastMeta.antigas_ignoradas > 0 && (
                 <Badge variant="outline">{lastMeta.antigas_ignoradas} antigas ocultadas</Badge>
               )}
+              {lastMeta.confirmadas > 0 && (
+                <Badge variant="outline" className="border-green-300 bg-green-50 text-green-700">
+                  {lastMeta.confirmadas} com data confirmada
+                </Badge>
+              )}
               {lastMeta.target_mode && <Badge variant="outline">Grupos selecionados</Badge>}
               {Object.entries(lastMeta.por_tipo ?? {}).length > 0 && (
                 <span className="flex items-center gap-1">
@@ -509,10 +553,23 @@ function RadarOportunidadesPage() {
                 onChange={(e) => setDataFilter(e.target.value as DataFilter)}
                 className="h-8 rounded-md border border-input bg-background px-2 text-sm"
               >
-                <option value="todas">Período: todas</option>
+                <option value="todas">Período: todos</option>
                 {DATA_FILTERS.map((d) => (
                   <option key={d.value} value={d.value}>
                     {d.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={anoFilter}
+                onChange={(e) => setAnoFilter(e.target.value as AnoFilter)}
+                className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                title="Filtra pela data real da publicação (somente datas confirmadas)"
+              >
+                <option value="todos">Ano: todos</option>
+                {years.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
                   </option>
                 ))}
               </select>
@@ -541,7 +598,8 @@ function RadarOportunidadesPage() {
             view === "busca"
               ? (!lastResults && searching) || (lastResults && lastResults.length === 0)
               : savedEmpty(buyers, sellers, statusFilter)
-          ) ? (
+          ) &&
+          viewData.semData.length === 0 ? (
           <EmptyState
             searching={searching}
             hasSaved={salvos.length > 0}
@@ -565,6 +623,37 @@ function RadarOportunidadesPage() {
                 </summary>
                 <div className="mt-2 space-y-2">
                   {sellers.map((o) => (
+                    <OpportunityCard
+                      key={o.id}
+                      opportunity={o}
+                      onStatus={(s) => changeStatus(o, s)}
+                      onSuggest={() => setSuggest(o)}
+                    />
+                  ))}
+                </div>
+              </details>
+            )}
+            {viewData.hasPeriod && viewData.semData.length > 0 && (
+              <details className="rounded-xl border border-dashed p-3 text-sm">
+                <summary className="flex cursor-pointer items-center gap-2 font-medium text-muted-foreground hover:text-foreground">
+                  <ShieldAlert className="size-4" />
+                  {viewData.semData.length} sem data confirmada — fora do filtro de período/ano
+                </summary>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Essas publicações não têm data real confirmada (o Facebook não expõe a data de
+                  forma confiável na busca), então não são contadas no filtro acima — abra a
+                  publicação para conferir a data real.
+                </p>
+                <div className="mt-2 space-y-2">
+                  {semBuyers.map((o) => (
+                    <OpportunityCard
+                      key={o.id}
+                      opportunity={o}
+                      onStatus={(s) => changeStatus(o, s)}
+                      onSuggest={() => setSuggest(o)}
+                    />
+                  ))}
+                  {semSellers.map((o) => (
                     <OpportunityCard
                       key={o.id}
                       opportunity={o}
@@ -624,15 +713,17 @@ function OpportunityCard({
                 <Tags className="mr-1 size-3" />
                 {o.nicho}
               </Badge>
-              {o.data_publicacao && Date.now() - Date.parse(o.data_publicacao) <= 7 * 864e5 && (
-                <Badge
-                  variant="outline"
-                  className="border-green-300 bg-green-50 text-green-700"
-                  title="Publicada nos últimos 7 dias"
-                >
-                  <CalendarDays className="mr-1 size-3" /> recente
-                </Badge>
-              )}
+              {o.verificado &&
+                o.data_publicacao &&
+                Date.now() - Date.parse(o.data_publicacao) <= 7 * 864e5 && (
+                  <Badge
+                    variant="outline"
+                    className="border-green-300 bg-green-50 text-green-700"
+                    title="Data real confirmada nos últimos 7 dias"
+                  >
+                    <CalendarDays className="mr-1 size-3" /> recente
+                  </Badge>
+                )}
             </div>
             {o.justificativa && (
               <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
