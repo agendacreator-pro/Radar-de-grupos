@@ -11,6 +11,7 @@ import {
   MessageCircle,
   Search,
   ShieldAlert,
+  ShieldCheck,
   ShoppingBag,
   Sparkles,
   Tags,
@@ -67,6 +68,8 @@ type MetaResult = {
   total_salvas: number;
   por_tipo: Record<string, number>;
   anuncios_ignorados: number;
+  antigas_ignoradas: number;
+  recent_mode: boolean;
   sources_ok: number;
   target_mode: boolean;
 };
@@ -99,6 +102,7 @@ function RadarOportunidadesPage() {
   const [term, setTerm] = useState("");
   const [selectedTerms, setSelectedTerms] = useState<string[]>([]);
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
+  const [recentOnly, setRecentOnly] = useState(false);
   const [searching, setSearching] = useState(false);
   const [stage, setStage] = useState("buscando");
   const [lastResults, setLastResults] = useState<Oportunidade[] | null>(null);
@@ -123,7 +127,10 @@ function RadarOportunidadesPage() {
     if (tipoFilter !== "todos") list = list.filter((o) => o.tipo_intencao === tipoFilter);
     if (dataFilter !== "todas") {
       const cutoff = Date.now() - Number(dataFilter.slice(0, -1)) * 86400000;
-      list = list.filter((o) => new Date(o.data_encontrada).getTime() >= cutoff);
+      list = list.filter((o) => {
+        const date = o.data_publicacao ?? o.data_encontrada;
+        return new Date(date).getTime() >= cutoff;
+      });
     }
     const arr = [...list];
     if (sort === "score") {
@@ -135,7 +142,9 @@ function RadarOportunidadesPage() {
         return b.score - a.score;
       });
     } else {
-      arr.sort((a, b) => b.data_encontrada.localeCompare(a.data_encontrada));
+      arr.sort((a, b) =>
+        (b.data_publicacao ?? b.data_encontrada).localeCompare(a.data_publicacao ?? a.data_encontrada),
+      );
     }
     return arr;
   }, [salvos, lastResults, view, statusFilter, tipoFilter, dataFilter, sort]);
@@ -182,6 +191,7 @@ function RadarOportunidadesPage() {
         terms: selectedTerms,
         token,
         groups: selectedGroups.map((g) => ({ url: g.url, name: g.name })),
+        recentDays: recentOnly ? 7 : 0,
       },
     }).catch((err: unknown) => {
       clearStage();
@@ -203,7 +213,19 @@ function RadarOportunidadesPage() {
       return;
     }
     setTerm("");
-    setLastResults(res.oportunidades);
+    setLastResults(
+      res.oportunidades.map((o) => {
+        const ro = o as unknown as Oportunidade;
+        return {
+          ...ro,
+          id: ro.id || `b-${o.post_url}`,
+          verificado: ro.verificado ?? false,
+          data_encontrada: ro.data_encontrada ?? new Date().toISOString(),
+          data_respondida: ro.data_respondida ?? null,
+          created_at: ro.created_at ?? new Date().toISOString(),
+        };
+      }),
+    );
     setLastMeta(res);
     queryClient.invalidateQueries({ queryKey: ["radar-oportunidades"] });
     if (res.total_salvas === 0 && res.sources_ok === 0) {
@@ -214,7 +236,7 @@ function RadarOportunidadesPage() {
       toast.info("Nenhuma publicação com intenção de compra encontrada. Tente outros termos.");
     } else {
       toast.success(
-        `${res.total_salvas} oportunidade(s) (${res.novas} novas, ${res.anuncios_ignorados} anúncios de vendedor ignorados).`,
+        `${res.total_salvas} oportunidade(s) (${res.novas} novas, ${res.anuncios_ignorados} anúncios de vendedor ignorados${res.antigas_ignoradas ? `, ${res.antigas_ignoradas} antigas ocultadas` : ""}).`,
       );
     }
   }
@@ -333,6 +355,28 @@ function RadarOportunidadesPage() {
             )}
           </div>
 
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">Frescor:</span>
+            <button
+              type="button"
+              onClick={() => setRecentOnly((v) => !v)}
+              title="Restringe a busca às publicações das últimas 7 dias"
+              className={cn(
+                "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
+                recentOnly
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-background text-muted-foreground hover:border-primary/50",
+              )}
+            >
+              Somente últimas 7 dias
+            </button>
+            {recentOnly && (
+              <span className="text-[11px] text-muted-foreground">
+                Publicações antigas confirmadas são ocultadas dos resultados.
+              </span>
+            )}
+          </div>
+
           {grupos.length > 0 && (
             <div>
               <div className="flex flex-wrap items-center gap-1.5">
@@ -393,6 +437,14 @@ function RadarOportunidadesPage() {
               <Badge variant="secondary">{lastMeta.total_salvas} oportunidades</Badge>
               <Badge variant="secondary">{lastMeta.novas} novas</Badge>
               <Badge variant="secondary">{lastMeta.anuncios_ignorados} anúncios ignorados</Badge>
+              {lastMeta.recent_mode && (
+                <Badge variant="secondary" className="border-primary/30 bg-primary/5 text-primary">
+                  só últimas 7 dias
+                </Badge>
+              )}
+              {lastMeta.antigas_ignoradas > 0 && (
+                <Badge variant="outline">{lastMeta.antigas_ignoradas} antigas ocultadas</Badge>
+              )}
               {lastMeta.target_mode && <Badge variant="outline">Grupos selecionados</Badge>}
               {Object.entries(lastMeta.por_tipo ?? {}).length > 0 && (
                 <span className="flex items-center gap-1">
@@ -572,6 +624,15 @@ function OpportunityCard({
                 <Tags className="mr-1 size-3" />
                 {o.nicho}
               </Badge>
+              {o.data_publicacao && Date.now() - Date.parse(o.data_publicacao) <= 7 * 864e5 && (
+                <Badge
+                  variant="outline"
+                  className="border-green-300 bg-green-50 text-green-700"
+                  title="Publicada nos últimos 7 dias"
+                >
+                  <CalendarDays className="mr-1 size-3" /> recente
+                </Badge>
+              )}
             </div>
             {o.justificativa && (
               <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
@@ -585,6 +646,13 @@ function OpportunityCard({
                 <CalendarDays className="size-3" />
                 {timeAgo(o.data_encontrada)}
               </span>
+              {o.data_publicacao && (
+                <span className="flex items-center gap-1">
+                  <ShieldCheck className="size-3" />
+                  Publicada {timeAgo(o.data_publicacao)}
+                  {o.verificado ? " · verificada" : " (estimada)"}
+                </span>
+              )}
               {o.grupo_nome && (
                 <span className="flex items-center gap-1">
                   <Users className="size-3" /> {o.grupo_nome}

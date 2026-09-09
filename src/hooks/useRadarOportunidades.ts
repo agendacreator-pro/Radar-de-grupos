@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 import type { Oportunidade, OportunidadeStatus } from "@/lib/radar-oportunidades";
+import type { OportunidadeTipo } from "@/lib/radar-intent";
 
 type OportunidadeRow = Database["public"]["Tables"]["radar_oportunidades"]["Row"];
 
@@ -15,12 +16,13 @@ function toOpportunity(row: OportunidadeRow): Oportunidade {
     trecho: row.trecho,
     nicho: row.nicho,
     termos_relacionados: row.termos_relacionados ?? [],
-    tipo_intencao: row.tipo_intencao,
+    tipo_intencao: row.tipo_intencao as OportunidadeTipo,
     score: row.score,
     justificativa: row.justificativa,
     fonte: row.fonte,
     status: (row.status as OportunidadeStatus) ?? "nova",
     verificado: row.verificado ?? false,
+    data_publicacao: row.data_publicacao ?? null,
     data_encontrada: row.data_encontrada,
     data_respondida: row.data_respondida,
     created_at: row.created_at,
@@ -54,12 +56,14 @@ export function useOportunidadeUpdateStatus() {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) throw new Error("Sem sessão");
-      const patch: Record<string, unknown> = { status, updated_at: new Date().toISOString() };
-      if (status === "respondida") patch["data_respondida"] = new Date().toISOString();
-      if (status !== "respondida") patch["data_respondida"] = null;
+      const now = new Date().toISOString();
       const { error } = await supabase
         .from("radar_oportunidades")
-        .update(patch)
+        .update({
+          status,
+          updated_at: now,
+          data_respondida: status === "respondida" ? now : null,
+        })
         .eq("id", id)
         .eq("user_id", user.id);
       if (error) throw error;

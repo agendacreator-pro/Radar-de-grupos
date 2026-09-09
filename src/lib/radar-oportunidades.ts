@@ -15,6 +15,7 @@ export type Oportunidade = {
   fonte: string;
   status: OportunidadeStatus;
   verificado: boolean;
+  data_publicacao: string | null;
   data_encontrada: string;
   data_respondida: string | null;
   created_at: string;

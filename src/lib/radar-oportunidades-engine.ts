@@ -77,7 +77,7 @@ function extractPostInfo(rawUrl: string): PostRef | null {
     if (!slugM) return null;
     const slug = (slugM[1] ?? "").replace(/[^a-zA-Z0-9_-]/g, "");
     if (!slug) return null;
-    return { slug, slugKey: slug.toLowerCase(), postId: viaQuery[1] };
+    return { slug, slugKey: slug.toLowerCase(), postId: viaQuery[1] ?? "" };
   }
   return null;
 }
@@ -187,7 +187,7 @@ function parseBingPosts(html: string): RawRow[] {
   return out;
 }
 
-async function tavilyPosts(q: string, key: string): Promise<RawRow[]> {
+async function tavilyPosts(q: string, key: string, days?: number): Promise<RawRow[]> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 14_000);
   try {
@@ -201,6 +201,7 @@ async function tavilyPosts(q: string, key: string): Promise<RawRow[]> {
         search_depth: "advanced",
         max_results: 20,
         include_domains: ["facebook.com"],
+        ...(days ? { days, sort_by: "recency" } : {}),
       }),
     });
     if (!res.ok) return [];
@@ -224,12 +225,12 @@ async function tavilyPosts(q: string, key: string): Promise<RawRow[]> {
   }
 }
 
-async function bravePosts(q: string, key: string): Promise<RawRow[]> {
+async function bravePosts(q: string, key: string, freshness?: string): Promise<RawRow[]> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 14_000);
   try {
     const res = await fetch(
-      `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(q)}&count=20&country=br`,
+      `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(q)}&count=20&country=br${freshness ? `&search_freshness=${freshness}` : ""}`,
       {
         signal: controller.signal,
         headers: { "X-Subscription-Token": key, Accept: "application/json" },
@@ -257,23 +258,33 @@ async function searchPostQuery(
   budget: { queries: number },
   tavilyKey: string | null,
   braveKey: string | null,
+  freshness: Freshness | null,
 ): Promise<{ rows: RawRow[]; ok: boolean; failures: string[] }> {
   if (budget.queries <= 0) return { rows: [], ok: true, failures: ["budget"] };
   const enc = encodeURIComponent(query);
+  const df = freshness ? `&df=${freshness.df}` : "";
 
   if (tavilyKey) {
     budget.queries--;
-    return { rows: await tavilyPosts(query, tavilyKey), ok: true, failures: [] };
+    return {
+      rows: await tavilyPosts(query, tavilyKey, freshness?.tavilyDays),
+      ok: true,
+      failures: [],
+    };
   }
   if (braveKey) {
     budget.queries--;
-    return { rows: await bravePosts(query, braveKey), ok: true, failures: [] };
+    return {
+      rows: await bravePosts(query, braveKey, freshness?.brave),
+      ok: true,
+      failures: [],
+    };
   }
 
   const attempts: Array<() => Promise<FetchedPage>> = [
-    () => fetchSerp(`https://html.duckduckgo.com/html/?q=${enc}&ia=web`),
+    () => fetchSerp(`https://html.duckduckgo.com/html/?q=${enc}&ia=web${df}`),
     () => fetchSerp(`https://lite.duckduckgo.com/lite/?q=${enc}`),
-    () => fetchSerp(`https://html.duckduckgo.com/html/?q=${enc}&kl=br-pt`),
+    () => fetchSerp(`https://html.duckduckgo.com/html/?q=${enc}&kl=br-pt${df}`),
   ];
   const failures: string[] = [];
   for (const attempt of attempts) {
@@ -310,6 +321,206 @@ async function searchPostQuery(
   return { rows: [], ok: false, failures };
 }
 
+// ---- Frescor da publicação ----
+type Freshness = { df: string; brave: string; tavilyDays: number };
+
+function buildFreshness(recentDays: number): Freshness | null {
+  if (!recentDays || recentDays <= 0) return null;
+  const df = recentDays <= 7 ? "w" : recentDays <= 31 ? "m" : "y";
+  const brave = recentDays <= 1 ? "fpd" : recentDays <= 7 ? "fpw" : recentDays <= 31 ? "fpm" : "fpq";
+  const tavilyDays = Math.min(30, Math.max(7, recentDays));
+  return { df, brave, tavilyDays };
+}
+
+const MONTHS_PT = [
+  "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+  "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+];
+const MONTHS_PT_ABBR = [
+  "jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez",
+];
+const MONTHS_EN = [
+  "january", "february", "march", "april", "may", "june",
+  "july", "august", "september", "october", "november", "december",
+];
+const MONTHS_EN_ABBR = [
+  "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+];
+
+function pluckMonth(name: string, table: string[], abbr: string[]): number | null {
+  const n = name.toLowerCase().replace(/[.,]/g, "").slice(0, 4);
+  const i = table.indexOf(name.toLowerCase()) >= 0 ? table.indexOf(name.toLowerCase()) : abbr.indexOf(n);
+  return i >= 0 ? i : null;
+}
+
+function sameMonthKey(d: Date): string {
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** Extrai data de publicação de título/snippet (PT/EN + relativos + marcadores de comentário). */
+function parsePostDate(title: string, snippet: string): string | null {
+  const text = `${title} ${snippet}`.slice(0, 1400);
+  const now = new Date();
+
+  const validRecent = (d: Date | null | undefined): d is Date =>
+    !!d && isFinite(+d) && d.getTime() <= now.getTime() + 36e5 && d.getTime() >= now.getTime() - 4 * 365 * 864e5;
+
+  // 1) dd/mm/aaaa ou aaaa-mm-dd
+  let m = text.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);
+  if (m) {
+    const d = new Date(Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1])));
+    if (validRecent(d)) return d.toISOString();
+  }
+  m = text.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
+  if (m) {
+    const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+    if (validRecent(d)) return d.toISOString();
+  }
+
+  // 2) "N de mês de AAAA" / "N de mês"
+  m = text.match(/\b(\d{1,2})\s+de\s+([a-zç]+)\s+(?:de\s+)?(\d{4})?\b/i);
+  if (m && m[1]) {
+    const mi = pluckMonth(m[2] ?? "", MONTHS_PT, MONTHS_PT_ABBR);
+    const day = Number(m[1]);
+    const year = m[3] ? Number(m[3]) : now.getUTCFullYear();
+    if (mi !== null && day >= 1 && day <= 31) {
+      const d = new Date(Date.UTC(year, mi, day));
+      if (validRecent(d)) return d.toISOString();
+    }
+  }
+
+  // 3) "mês de AAAA" (sem dia)
+  m = text.match(/\b([a-zç]+)\s+de\s+(\d{4})\b/i);
+  if (m) {
+    const mi = pluckMonth(m[1] ?? "", MONTHS_PT, MONTHS_PT_ABBR);
+    if (mi !== null) {
+      const d = new Date(Date.UTC(Number(m[2]), mi, 1));
+      if (validRecent(d)) return d.toISOString();
+    }
+  }
+
+  // 4) Relativos em português
+  const ptUnits: Array<[RegExp, number]> = [
+    [/\b(?:há|faz)\s+(\d+)[.,]?(\d*)\s*(min(?:utos?)?|h|hora(?:s)?)\b/i, 0],
+    [/\b(?:há|faz)\s+(\d+)(\.\d+)?\s+dias?\b/i, 1],
+    [/\b(?:há|faz)\s+(\d+)(\.\d+)?\s+semanas?\b/i, 2],
+    [/\b(?:há|faz)\s+(\d+)(\.\d+)?\s+(mes(?:es)?|mês)\b/i, 3],
+    [/\b(?:há|faz)\s+(\d+)(\.\d+)?\s+anos?\b/i, 4],
+    [/\b(?:há|faz)\s+(um|uma)\s+(minuto|hora|dia|semana|mês|meses|ano)\b/i, 5],
+    [/\bontem\b/i, 6],
+    [/\bhoje\b/i, 7],
+  ];
+  for (const [re, kind] of ptUnits) {
+    const mm = text.match(re);
+    if (!mm) continue;
+    const t = new Date(now.getTime());
+    if (kind === 0) t.setMinutes(t.getMinutes() - (Number(mm[1]) + Number(parseFloat(mm[2] ?? "0") || 0) / 10));
+    else if (kind === 1) t.setDate(t.getDate() - Number(mm[1]));
+    else if (kind === 2) t.setDate(t.getDate() - Number(mm[1]) * 7);
+    else if (kind === 3) t.setMonth(t.getMonth() - Number(mm[1]));
+    else if (kind === 4) t.setFullYear(t.getFullYear() - Number(mm[1]));
+    else if (kind === 5) {
+      const u = mm[2] ?? "";
+      if (/minuto/.test(u)) t.setMinutes(t.getMinutes() - 1);
+      else if (/hora/.test(u)) t.setHours(t.getHours() - 1);
+      else if (/dia/.test(u)) t.setDate(t.getDate() - 1);
+      else if (/semana/.test(u)) t.setDate(t.getDate() - 7);
+      else if (/mês|meses/.test(u)) t.setMonth(t.getMonth() - 1);
+      else t.setFullYear(t.getFullYear() - 1);
+    } else if (kind === 6) t.setDate(t.getDate() - 1);
+    if (validRecent(t)) return t.toISOString();
+  }
+
+  // 5) Relativos em inglês
+  const enUnits: Array<[RegExp, number]> = [
+    [/\b(\d+)\s+(minutes?|hours?)\s+ago\b/i, 0],
+    [/\b(\d+[.,]?\d*)\s+(days?)\s+ago\b/i, 1],
+    [/\b(\d+[.,]?\d*)\s+(weeks?)\s+ago\b/i, 2],
+    [/\b(\d+[.,]?\d*)\s+(months?)\s+ago\b/i, 3],
+    [/\b(\d+[.,]?\d*)\s+(years?)\s+ago\b/i, 4],
+    [/\b(a\s+minute|an?\s+hour|a\s+day|a\s+week|a\s+month|a\s+year)\s+ago\b/i, 5],
+    [/\byesterday\b/i, 6],
+  ];
+  for (const [re, kind] of enUnits) {
+    const mm = text.match(re);
+    if (!mm) continue;
+    const t = new Date(now.getTime());
+    if (kind === 0) t.setMinutes(t.getMinutes() - Number(mm[1]));
+    else if (kind === 1) t.setDate(t.getDate() - Number(mm[1]));
+    else if (kind === 2) t.setDate(t.getDate() - Number(mm[1]) * 7);
+    else if (kind === 3) t.setMonth(t.getMonth() - Number(mm[1]));
+    else if (kind === 4) t.setFullYear(t.getFullYear() - Number(mm[1]));
+    else if (kind === 5) {
+      const en = mm[1] ?? "";
+      if (/minute/.test(en)) t.setMinutes(t.getMinutes() - 1);
+      else if (/hour/.test(en)) t.setHours(t.getHours() - 1);
+      else if (/day/.test(en)) t.setDate(t.getDate() - 1);
+      else if (/week/.test(en)) t.setDate(t.getDate() - 7);
+      else if (/month/.test(en)) t.setMonth(t.getMonth() - 1);
+      else t.setFullYear(t.getFullYear() - 1);
+    } else if (kind === 6) t.setDate(t.getDate() - 1);
+    if (validRecent(t)) return t.toISOString();
+  }
+
+  // 6) Marcadores de comentário do Facebook ("Maria · 8y") → antigo parece "8y".
+  m = text.match(/\b(\d{1,2})\s*y\.?\b/i);
+  if (m && Number(m[1]) >= 1 && Number(m[1]) <= 12) {
+    const d = new Date(now.getTime());
+    d.setFullYear(d.getFullYear() - Number(m[1]));
+    if (validRecent(d)) return d.toISOString();
+  }
+  m = text.match(/\b(\d{1,2})\s*m\.?\b/i);
+  if (m && Number(m[1]) >= 1 && Number(m[1]) <= 12) {
+    const d = new Date(now.getTime());
+    d.setMonth(d.getMonth() - Number(m[1]));
+    if (validRecent(d)) return d.toISOString();
+  }
+
+  return null;
+}
+
+/** Busca artigo:published_time/meta na página do post (best effort, curtíssimo). */
+async function fetchPostDateMeta(url: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      redirect: "follow",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+        "Accept-Language": "pt-BR,pt;q=0.9",
+      },
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    if (html.length < 200) return null;
+    const caps: Array<[RegExp, number]> = [
+      [/<meta[^>]+property=["']article:published_time["'][^>]+content=["']([^"']+)["']/i, 1],
+      [/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']article:published_time["']/i, 1],
+      [/"created_time"\s*:\s*"([^"]+)"/, 1],
+      [/<time[^>]+datetime=["']([^"']+)["']/i, 1],
+    ];
+    for (const [re, g] of caps) {
+      const mm = html.match(re);
+      if (!mm) continue;
+      const ts = Date.parse(mm[g] ?? "");
+      if (isFinite(ts)) {
+        const d = new Date(ts);
+        if (d.getTime() <= Date.now() + 36e5 && d.getTime() >= Date.now() - 4 * 365 * 864e5) {
+          return d.toISOString();
+        }
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ---- Construção da publicação candidata ----
 type Candidate = {
   post_url: string;
@@ -323,6 +534,9 @@ type Candidate = {
   score: number;
   justificativa: string | null;
   fonte: string;
+  titulo: string;
+  data_publicacao: string | null;
+  publicacao_confirmada: boolean;
   key: string;
 };
 
@@ -332,7 +546,7 @@ function buildCandidate(
     term: string;
     terms: string[];
     source: string;
-    targeted?: { url: string; name?: string };
+    targeted?: { url: string; name: string | null };
   },
 ): Candidate | null {
   const ref = extractPostInfo(row.href);
@@ -350,6 +564,7 @@ function buildCandidate(
   }
   const score = Math.min(100, result.score + (text.includes(context.term) ? 4 : 0));
   const grupoUrl = normalizePostUrl(ref);
+  const data = parsePostDate(row.title, row.snippet);
   return {
     post_url: grupoUrl,
     post_id: ref.postId,
@@ -362,6 +577,9 @@ function buildCandidate(
     score,
     justificativa: result.justificativa || null,
     fonte: context.targeted ? `${context.source}/grupos-salvos` : context.source,
+    titulo: titleText.slice(0, 200),
+    data_publicacao: data,
+    publicacao_confirmada: false,
     key: postDedupeKey(ref),
   };
 }
@@ -375,6 +593,7 @@ export type OportunidadeInput = {
   terms: string[];
   token: string;
   groups: Array<{ url: string; name?: string }>;
+  recentDays?: number;
 };
 
 export const oportunidadesSearch = createServerFn({ method: "POST" })
@@ -405,6 +624,8 @@ export const oportunidadesSearch = createServerFn({ method: "POST" })
     const tavilyKey = (process.env["TAVILY_API_KEY"] as string | undefined) || null;
     const braveKey = (process.env["BRAVE_API_KEY"] as string | undefined) || null;
     const sourceName = tavilyKey ? "tavily" : braveKey ? "brave" : "duckduckgo";
+    const freshness = buildFreshness(data.recentDays ?? 0);
+    const recentCutoff = freshness ? Date.now() - data.recentDays! * 864e5 : 0;
 
     const budget = { queries: MAX_QUERIES };
     const wallDeadline = t0 + WALL_BUDGET_MS;
@@ -460,7 +681,7 @@ export const oportunidadesSearch = createServerFn({ method: "POST" })
 
     async function runTask(task: (typeof tasks)[number]) {
       if (budget.queries <= 0 || Date.now() > wallDeadline) return;
-      const { rows, ok, failures } = await searchPostQuery(task.q, budget, tavilyKey, braveKey);
+      const { rows, ok, failures } = await searchPostQuery(task.q, budget, tavilyKey, braveKey, freshness);
       if (ok && rows.length > 0) sourcesOk++;
       else if (failures.length) sourceFailures.push(...failures);
       for (const r of rows) {
@@ -468,9 +689,9 @@ export const oportunidadesSearch = createServerFn({ method: "POST" })
           term: task.term,
           terms,
           source: sourceName,
-          targeted: task.targeted
-            ? { url: task.targeted.url, name: task.targeted.name ?? undefined }
-            : undefined,
+          ...(task.targeted
+            ? { targeted: { url: task.targeted.url, name: task.targeted.name ?? null } }
+            : {}),
         });
         if (!cand) continue;
         const cur = discovered.get(cand.key);
@@ -510,10 +731,48 @@ export const oportunidadesSearch = createServerFn({ method: "POST" })
 
     const all = [...discovered.values()];
     // Separa vendedores (ficam só como metadados da busca, não são salvos).
-    const oportunidades = all
+    let oportunidades = all
       .filter((c) => c.tipo_intencao !== "anuncio_vendedor")
       .sort((a, b) => b.score - a.score);
     const anuncios = all.filter((c) => c.tipo_intencao === "anuncio_vendedor");
+
+    // Data de publicação: confirma (via página do post) só os melhores quando sobram subrequests.
+    if (oportunidades.length > 0 && budget.queries >= 12) {
+      const top = oportunidades.slice(0, 6);
+      await Promise.all(
+        top.map(async (o) => {
+          const meta = await fetchPostDateMeta(o.post_url);
+          if (meta) {
+            o.data_publicacao = meta;
+            o.publicacao_confirmada = true;
+          }
+        }),
+      );
+      // Reordena com base na data confirmada por página (heurística segue como tiebreak).
+      if (top.some((o) => o.publicacao_confirmada)) {
+        oportunidades = oportunidades.sort((a, b) => {
+          const da = a.publicacao_confirmada ? Date.parse(a.data_publicacao ?? "") : 0;
+          const db = b.publicacao_confirmada ? Date.parse(b.data_publicacao ?? "") : 0;
+          return db - da;
+        });
+      }
+    }
+
+    let antigasIgnoradas = 0;
+    if (freshness) {
+      const antes = oportunidades.length;
+      oportunidades = oportunidades.filter((o) => {
+        if (!o.data_publicacao || o.publicacao_confirmada) return true;
+        return Date.parse(o.data_publicacao) >= recentCutoff;
+      });
+      antigasIgnoradas = antes - oportunidades.length;
+      // Desempate final: mais recentes primeiro.
+      oportunidades = oportunidades.sort((a, b) => {
+        const da = a.data_publicacao ? Date.parse(a.data_publicacao) : 0;
+        const db = b.data_publicacao ? Date.parse(b.data_publicacao) : 0;
+        return db - da || b.score - a.score;
+      });
+    }
 
     // Persistência (owner) — via service role.
     let inserted = 0;
@@ -553,7 +812,8 @@ export const oportunidadesSearch = createServerFn({ method: "POST" })
               score: o.score,
               justificativa: o.justificativa,
               fonte: o.fonte,
-              verificado: true,
+              data_publicacao: o.data_publicacao,
+              verificado: o.publicacao_confirmada,
               ultima_verificacao: new Date().toISOString(),
             })),
             { onConflict: "user_id,post_url", ignoreDuplicates: true },
@@ -561,6 +821,21 @@ export const oportunidadesSearch = createServerFn({ method: "POST" })
           if (insErr) console.error("[oportunidades] insert chunk:", insErr.message);
         }
         inserted = novelos.length;
+        // 2b) Já conhecidas: reforça metadados quando confirmados na página do post.
+        const refreshables = toSave.filter(
+          (o) => o.publicacao_confirmada && existMap.has(o.post_url),
+        );
+        if (refreshables.length > 0) {
+          const { error: updErr } = await admin
+            .from("radar_oportunidades")
+            .update({ verificado: true, ultima_verificacao: new Date().toISOString() })
+            .eq("user_id", userId)
+            .in(
+              "post_url",
+              refreshables.map((o) => o.post_url),
+            );
+          if (updErr) console.error("[oportunidades] refresh metadados:", updErr.message);
+        }
         // 3) Recarrega com status (uma única query).
         const { data: saved } = await admin
           .from("radar_oportunidades")
@@ -606,6 +881,8 @@ export const oportunidadesSearch = createServerFn({ method: "POST" })
       total_salvas: rows.length,
       por_tipo: porTipo,
       anuncios_ignorados: anuncios.length,
+      antigas_ignoradas: antigasIgnoradas,
+      recent_mode: !!freshness,
       oportunidades: rows,
       sources_ok: sourcesOk,
       source_failures: [...new Set(sourceFailures)].slice(0, 8),
