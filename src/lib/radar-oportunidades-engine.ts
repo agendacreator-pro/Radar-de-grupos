@@ -910,3 +910,29 @@ export const oportunidadesSearch = createServerFn({ method: "POST" })
       terms_used: terms,
     };
   });
+
+export type OportunidadeWipeInput = { token: string };
+
+// Zera a carteira de oportunidades do usuário para começar do zero.
+export const oportunidadesWipe = createServerFn({ method: "POST" })
+  .validator((d: OportunidadeWipeInput) => d)
+  .handler(async ({ data }) => {
+    const userId = await verifyUser(data.token);
+    if (!userId) return { success: false, error: "Sessão expirada. Entre novamente." };
+    try {
+      const admin = await getAdmin();
+      const { data: mine } = await admin
+        .from("radar_oportunidades")
+        .select("id")
+        .eq("user_id", userId);
+      const count = (mine ?? []).length;
+      await admin.from("radar_oportunidades").delete().eq("user_id", userId);
+      return { success: true, deleted: count };
+    } catch (err) {
+      console.error("[oportunidades] wipe:", err);
+      return {
+        success: false,
+        error: "Não foi possível limpar as oportunidades agora. Tente novamente em instantes.",
+      };
+    }
+  });

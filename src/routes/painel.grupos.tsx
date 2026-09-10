@@ -339,8 +339,18 @@ function RadarGruposPage() {
         return;
       }
       queryClient.invalidateQueries({ queryKey: ["radar-grupos"] });
+      queryClient.invalidateQueries({ queryKey: ["radar-listasy"] });
+      queryClient.invalidateQueries({ queryKey: ["radar-lista-grupos-map"] });
+      queryClient.invalidateQueries({ queryKey: ["radar-historia"] });
       setLastResults(null);
       setLastMeta(null);
+      setPostingFilter("posso");
+      setVisibilidade("todos");
+      setMinMembers(null);
+      setStatusFilter("todos");
+      setCountryFilter("todos");
+      setSoFavoritos(false);
+      setView("resumo");
       toast.success(
         `${res.deleted ?? 0} grupo(s) zerado(s). Próxima busca vai trazer grupos novos do nicho.`,
       );

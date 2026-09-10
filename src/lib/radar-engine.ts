@@ -918,6 +918,9 @@ export const radarWipe = createServerFn({ method: "POST" })
       ids = (mine ?? []).map((r: any) => r.grupo_id as string);
       await admin.from("radar_grupo_usuario").delete().eq("user_id", userId);
       await admin.from("radar_lista_grupos").delete().eq("user_id", userId);
+      // Listas do usuário e histórico de buscas também entram no zero total.
+      await admin.from("radar_listas").delete().eq("user_id", userId);
+      await admin.from("radar_buscas").delete().eq("user_id", userId);
       if (ids.length > 0) {
         const { data: stillUsed } = await admin
           .from("radar_grupo_usuario")

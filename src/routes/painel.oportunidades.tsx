@@ -15,6 +15,7 @@ import {
   ShoppingBag,
   Sparkles,
   Tags,
+  Trash2,
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -46,7 +47,7 @@ import {
 } from "@/lib/radar-oportunidades";
 import { RADAR_SUGGESTED_TERMS } from "@/lib/radar";
 import { supabase } from "@/integrations/supabase/client";
-import { oportunidadesSearch } from "@/lib/radar-oportunidades-engine";
+import { oportunidadesSearch, oportunidadesWipe } from "@/lib/radar-oportunidades-engine";
 import { useOportunidadeUpdateStatus, useOportunidades } from "@/hooks/useRadarOportunidades";
 import { useRadarGroups } from "@/hooks/useRadar";
 
@@ -116,6 +117,7 @@ function RadarOportunidadesPage() {
   const [dataFilter, setDataFilter] = useState<DataFilter>("todas");
   const [anoFilter, setAnoFilter] = useState<AnoFilter>("todos");
   const [sort, setSort] = useState<Sort>("score");
+  const [confirmWipe, setConfirmWipe] = useState(false);
 
   const stageTimer = useRef<number | null>(null);
   const cancelRef = useRef(false);
@@ -308,6 +310,45 @@ function RadarOportunidadesPage() {
     toast.info("Busca cancelada. Os resultados já salvos continuam disponíveis.");
   }
 
+  useEffect(() => {
+    if (!confirmWipe) return;
+    const t = window.setTimeout(() => setConfirmWipe(false), 6000);
+    return () => window.clearTimeout(t);
+  }, [confirmWipe]);
+
+  async function handleWipe() {
+    setSearching(true);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token ?? "";
+      const res = await oportunidadesWipe({ data: { token } });
+      if (!res.success || res.error) {
+        toast.error(res.error ?? "Não foi possível limpar agora. Tente novamente em instantes.");
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: ["radar-oportunidades"] });
+      setLastResults(null);
+      setLastMeta(null);
+      setView("salvas");
+      setStatusFilter("todos");
+      setTipoFilter("todos");
+      setDataFilter("todas");
+      setAnoFilter("todos");
+      setSort("score");
+      toast.success(
+        `${res.deleted ?? 0} oportunidade(s) zerada(s). Próxima busca vai trazer oportunidades novas.`,
+      );
+    } catch (err) {
+      console.error("[oportunidades] wipe:", err);
+      toast.error("Falha ao limpar. Tente novamente em instantes.");
+    } finally {
+      setSearching(false);
+      setConfirmWipe(false);
+    }
+  }
+
   async function changeStatus(o: Oportunidade, status: OportunidadeStatus) {
     setLastResults((prev) =>
       prev ? prev.map((x) => (x.id === o.id ? { ...x, status } : x)) : prev,
@@ -332,6 +373,34 @@ function RadarOportunidadesPage() {
             Encontre publicações de quem está <strong>procurando</strong> o seu nicho em grupos do
             Facebook e organize sua carteira de atendimento.
           </p>
+        </div>
+        <div className="flex gap-2">
+          {confirmWipe ? (
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => void handleWipe()}
+              disabled={searching}
+              title="Confirma: apaga TODAS as oportunidades salvas para recomeçar"
+            >
+              {searching ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Trash2 className="size-4" />
+              )}
+              Confirmar limpar
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setConfirmWipe(true)}
+              disabled={searching}
+              title="Limpar/zerar as oportunidades salvas para recomeçar a carteira"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          )}
         </div>
       </header>
 
