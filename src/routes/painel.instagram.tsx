@@ -182,14 +182,18 @@ function TrendCard({
             </p>
           )}
           {t.adaptacao && (
-            <p className="rounded-md border border-primary/20 bg-primary/5 px-2 py-1.5 text-[11px] text-foreground">
+            <p className="rounded-md border border-[#DD2A7B]/25 bg-[#E1306C]/5 px-2 py-1.5 text-[11px] text-foreground">
               💡 {t.adaptacao}
             </p>
           )}
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Button size="sm" onClick={() => onTransform(t)}>
+          <Button
+            size="sm"
+            className="bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white hover:from-[#DD2A7B] hover:via-[#C13584] hover:to-[#962FBF]"
+            onClick={() => onTransform(t)}
+          >
             <Wand2 className="size-3.5" /> Transformar trend
           </Button>
           <Button size="sm" variant="outline" onClick={() => onAgendar(t)}>
@@ -200,7 +204,7 @@ function TrendCard({
               href={t.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-background px-3 text-xs text-muted-foreground hover:text-primary"
+              className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-background px-3 text-xs text-muted-foreground hover:text-[#E1306C]"
               title="Origem observada (busca pública)"
             >
               <ExternalLink className="size-3.5" /> Fonte
@@ -221,7 +225,7 @@ function AudioCard({ a }: { a: InstaAudio }) {
           <FonteBadge fonte={a.fonte} detalhe={a.fonte_detalhe} />
         </div>
         <p className="mt-1.5 flex items-center gap-1 text-sm font-semibold text-foreground">
-          <ListMusic className="size-4 text-primary" /> {a.nome}
+          <ListMusic className="size-4 text-[#E1306C]" /> {a.nome}
         </p>
         <div className="mt-2 space-y-1 text-xs text-muted-foreground">
           {a.artista ? (
@@ -451,7 +455,7 @@ function RadarInstagramPage() {
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold text-foreground">
-            <Instagram className="size-7 text-primary" />
+            <Instagram className="size-7 bg-gradient-to-br from-[#F58529] via-[#DD2A7B] to-[#8134AF] bg-clip-text text-transparent" />
             Radar do Algoritmo
           </h1>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
@@ -482,7 +486,12 @@ function RadarInstagramPage() {
                     : "Aguardando primeira execução"
             }
           />
-          <Button size="sm" onClick={() => void handleRun()} disabled={run.isPending}>
+          <Button
+            size="sm"
+            className="bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white hover:from-[#DD2A7B] hover:via-[#C13584] hover:to-[#962FBF]"
+            onClick={() => void handleRun()}
+            disabled={run.isPending}
+          >
             {run.isPending ? (
               <Loader2 className="size-4 animate-spin" />
             ) : (
@@ -527,9 +536,9 @@ function RadarInstagramPage() {
             type="button"
             disabled={!s.onClick}
             onClick={s.onClick}
-            className="rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-colors hover:border-primary disabled:hover:border-border"
+            className="rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-colors hover:border-[#E1306C] disabled:hover:border-border"
           >
-            <s.icon className="size-5 text-primary" />
+            <s.icon className="size-5 text-[#E1306C]" />
             <span className="mt-2 block text-2xl font-bold leading-none">{s.value}</span>
             <span className="mt-1 block text-xs text-muted-foreground">{s.label}</span>
           </button>
@@ -587,7 +596,7 @@ function RadarInstagramPage() {
       <section className="mt-8">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
-            <Radar className="size-5 text-primary" />
+            <Radar className="size-5 text-[#E1306C]" />
             Tendências do momento
           </h2>
           <div className="flex flex-wrap items-center gap-1.5">
@@ -597,8 +606,8 @@ function RadarInstagramPage() {
               className={cn(
                 "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
                 cycleFilter === "todos"
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-border bg-background text-muted-foreground hover:border-primary/50",
+                  ? "border-transparent bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white"
+                  : "border-border bg-background text-muted-foreground hover:border-[#E1306C]/50",
               )}
             >
               Todas ({trends.length})
@@ -611,8 +620,8 @@ function RadarInstagramPage() {
                 className={cn(
                   "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
                   cycleFilter === c
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-border bg-background text-muted-foreground hover:border-primary/50",
+                    ? "border-transparent bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white"
+                    : "border-border bg-background text-muted-foreground hover:border-[#E1306C]/50",
                 )}
               >
                 {INSTA_CICLO_LABELS[c]} ({n})
@@ -643,7 +652,7 @@ function RadarInstagramPage() {
       {/* Áudios em alta */}
       <section className="mt-8">
         <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
-          <ListMusic className="size-5 text-primary" />
+          <ListMusic className="size-5 text-[#E1306C]" />
           Áudios em alta
         </h2>
         {audios.length === 0 ? (
@@ -663,7 +672,7 @@ function RadarInstagramPage() {
       {/* Emergentes & Saturadas */}
       <section className="mt-8 grid gap-4 lg:grid-cols-2">
         <div>
-          <h2 className="flex items-center gap-2 text-lg font-bold text-emerald-700">
+          <h2 className="flex items-center gap-2 text-lg font-bold text-[#C13584]">
             <ArrowUp className="size-5" />
             Emergentes (aproveitar agora)
           </h2>
@@ -711,7 +720,7 @@ function RadarInstagramPage() {
       {/* Ganchos */}
       <section className="mt-8">
         <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
-          <Play className="size-5 text-primary" />
+          <Play className="size-5 text-[#E1306C]" />
           Ganchos que funcionam (acele sua abertura)
         </h2>
         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -732,10 +741,10 @@ function RadarInstagramPage() {
       <section ref={alertsRef} className="mt-8 scroll-mt-20">
         <div className="flex items-center justify-between gap-2">
           <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
-            <MessageSquare className="size-5 text-primary" />
+            <MessageSquare className="size-5 text-[#E1306C]" />
             Alertas automáticos
             {(stats?.alertas_nao_lidos ?? 0) > 0 && (
-              <Badge className="bg-primary text-primary-foreground">
+              <Badge className="bg-gradient-to-r from-[#DD2A7B] to-[#8134AF] text-white">
                 {stats?.alertas_nao_lidos} novos
               </Badge>
             )}
@@ -765,7 +774,7 @@ function RadarInstagramPage() {
       {/* Histórico */}
       <section className="mt-8">
         <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
-          <RefreshCw className="size-5 text-primary" />
+          <RefreshCw className="size-5 text-[#E1306C]" />
           Histórico de análises
         </h2>
         {history.length === 0 ? (
@@ -813,7 +822,7 @@ function RadarInstagramPage() {
       <section className="mt-8">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
-            <Calendar className="size-5 text-primary" />
+            <Calendar className="size-5 text-[#E1306C]" />
             Calendário da semana
           </h2>
           <Button
@@ -852,7 +861,7 @@ function RadarInstagramPage() {
                         {p.ideia}
                       </p>
                       {(p.trend || p.audio) && (
-                        <p className="mt-1 truncate text-[10px] text-primary">
+                        <p className="mt-1 truncate text-[10px] text-[#E1306C]">
                           {p.trend ? `trend: ${p.trend}` : `áudio: ${p.audio}`}
                         </p>
                       )}
@@ -878,7 +887,7 @@ function RadarInstagramPage() {
       {/* Conexão oficial */}
       <section className="mt-8">
         <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
-          <Box className="size-5 text-primary" />
+          <Box className="size-5 text-[#E1306C]" />
           Conectar Instagram (dados oficiais)
         </h2>
         <Card className="mt-3">
@@ -1042,10 +1051,12 @@ function EmergenteRow({
 
 function AlertRow({ a }: { a: InstaAlert }) {
   return (
-    <div className={cn("rounded-xl border bg-card p-3 shadow-sm", !a.lido && "border-primary/40")}>
+    <div
+      className={cn("rounded-xl border bg-card p-3 shadow-sm", !a.lido && "border-[#E1306C]/40")}
+    >
       <div className="flex flex-wrap items-center gap-2">
         {!a.lido && (
-          <span className="size-2 animate-pulse rounded-full bg-primary" title="Não lido" />
+          <span className="size-2 animate-pulse rounded-full bg-[#E1306C]" title="Não lido" />
         )}
         <p className="text-sm font-medium text-foreground">{a.titulo}</p>
         <Badge variant="outline" className="text-[10px]">
@@ -1071,7 +1082,7 @@ function EmptyRadar({
     <div className="mt-3 grid place-items-center rounded-xl border border-dashed py-14 text-center">
       <div className="space-y-2">
         {searching ? (
-          <Loader2 className="mx-auto size-8 animate-spin text-primary" />
+          <Loader2 className="mx-auto size-8 animate-spin text-[#E1306C]" />
         ) : (
           <Radar className="mx-auto size-8 text-muted-foreground" />
         )}
@@ -1112,7 +1123,7 @@ function ContentDialog({
       <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="size-4 text-primary" />
+            <Sparkles className="size-4 text-[#E1306C]" />
             {content?.sugestao ?? "Gerando…"}
           </DialogTitle>
           <DialogDescription>
@@ -1185,7 +1196,7 @@ function ContentDialog({
                   <Badge
                     key={h}
                     variant="outline"
-                    className="border-primary/30 bg-primary/5 text-primary"
+                    className="border-[#DD2A7B]/30 bg-[#E1306C]/5 text-[#E1306C]"
                   >
                     {h}
                   </Badge>
@@ -1197,7 +1208,10 @@ function ContentDialog({
               <p className="mt-1 text-sm text-foreground">{content.capa}</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button onClick={() => onAgendar(content)}>
+              <Button
+                className="bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white hover:from-[#DD2A7B] hover:via-[#C13584] hover:to-[#962FBF]"
+                onClick={() => onAgendar(content)}
+              >
                 <Calendar className="size-4" /> Adicionar ao planejamento
               </Button>
               <Button
@@ -1257,7 +1271,7 @@ function PlanDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Calendar className="size-4 text-primary" />
+            <Calendar className="size-4 text-[#E1306C]" />
             Adicionar ao planejamento
           </DialogTitle>
           <DialogDescription>Agende o conteúdo do dia. Você ajusta depois.</DialogDescription>
@@ -1348,7 +1362,11 @@ function PlanDialog({
               </select>
             </label>
           </div>
-          <Button className="w-full" onClick={onSave} disabled={saving}>
+          <Button
+            className="w-full bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white hover:from-[#DD2A7B] hover:via-[#C13584] hover:to-[#962FBF]"
+            onClick={onSave}
+            disabled={saving}
+          >
             {saving ? <Loader2 className="size-4 animate-spin" /> : <Calendar className="size-4" />}
             Salvar no planejamento
           </Button>
