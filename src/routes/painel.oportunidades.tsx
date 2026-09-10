@@ -119,6 +119,7 @@ function RadarOportunidadesPage() {
 
   const stageTimer = useRef<number | null>(null);
   const cancelRef = useRef(false);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
   const selectedGroups = grupos.filter((g) => selectedGroupIds.includes(g.id));
 
@@ -189,6 +190,26 @@ function RadarOportunidadesPage() {
     const quentes = salvos.filter((o) => o.tipo_intencao === "alta_compra").length;
     return { total, queroAtender, respondidas, quentes };
   }, [salvos]);
+
+  function selectStat(key: "total" | "queroAtender" | "respondidas" | "quentes") {
+    setView("salvas");
+    setDataFilter("todas");
+    setAnoFilter("todos");
+    if (key === "total") {
+      setStatusFilter("todos");
+      setTipoFilter("todos");
+    } else if (key === "queroAtender") {
+      setStatusFilter("quero_atender");
+      setTipoFilter("todos");
+    } else if (key === "respondidas") {
+      setStatusFilter("respondida");
+      setTipoFilter("todos");
+    } else {
+      setStatusFilter("todos");
+      setTipoFilter("alta_compra");
+    }
+    setTimeout(() => listRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  }
 
   function toggleGroup(id: string) {
     setSelectedGroupIds((prev) =>
@@ -317,21 +338,38 @@ function RadarOportunidadesPage() {
       {/* Estatísticas rápidas */}
       <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
-          { label: "Oportunidades salvas", value: stats.total, icon: ShoppingBag },
-          { label: "Quer atender", value: stats.queroAtender, icon: Sparkles },
-          { label: "Já respondidas", value: stats.respondidas, icon: CheckCircle2 },
-          { label: "Quer comprar", value: stats.quentes, icon: Users },
-        ].map((s) => (
-          <Card key={s.label} className="bg-card">
-            <CardContent className="flex items-center gap-3 p-4">
-              <s.icon className="size-5 shrink-0 text-primary" />
-              <div>
-                <div className="text-xl font-bold leading-none">{s.value}</div>
-                <div className="mt-1 text-xs text-muted-foreground">{s.label}</div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+          { key: "total" as const, label: "Oportunidades salvas", value: stats.total, icon: ShoppingBag },
+          { key: "queroAtender" as const, label: "Quer atender", value: stats.queroAtender, icon: Sparkles },
+          { key: "respondidas" as const, label: "Já respondidas", value: stats.respondidas, icon: CheckCircle2 },
+          { key: "quentes" as const, label: "Quer comprar", value: stats.quentes, icon: Users },
+        ].map((s) => {
+          const active =
+            view === "salvas" &&
+            ((s.key === "total" && statusFilter === "todos" && tipoFilter === "todos") ||
+              (s.key === "queroAtender" && statusFilter === "quero_atender") ||
+              (s.key === "respondidas" && statusFilter === "respondida") ||
+              (s.key === "quentes" && tipoFilter === "alta_compra"));
+          return (
+            <button
+              key={s.label}
+              type="button"
+              onClick={() => selectStat(s.key)}
+              title={`Mostrar: ${s.label}`}
+              className={cn(
+                "rounded-xl border bg-card text-left shadow-sm transition-colors hover:border-primary hover:bg-accent",
+                active ? "border-primary ring-1 ring-primary" : "border-border",
+              )}
+            >
+              <span className="flex items-center gap-3 p-4">
+                <s.icon className="size-5 shrink-0 text-primary" />
+                <span>
+                  <span className="block text-xl font-bold leading-none">{s.value}</span>
+                  <span className="mt-1 block text-xs text-muted-foreground">{s.label}</span>
+                </span>
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Busca */}
@@ -587,7 +625,7 @@ function RadarOportunidadesPage() {
       </Card>
 
       {/* Lista */}
-      <div className="mt-4">
+      <div ref={listRef} className="mt-4 scroll-mt-4">
         {loadingSalvos && view === "salvas" && !lastResults ? (
           <div className="space-y-3">
             {Array.from({ length: 5 }).map((_, i) => (
