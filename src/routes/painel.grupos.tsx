@@ -12,6 +12,7 @@ import {
   Import,
   Info,
   LayoutGrid,
+  LayoutList,
   List,
   Loader2,
   Megaphone,
@@ -194,9 +195,9 @@ function RadarGruposPage() {
   const [sort, setSort] = useState<Sort>("maiores");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("todos");
   const [countryFilter, setCountryFilter] = useState<string>("todos");
-  const [postingFilter, setPostingFilter] = useState<PostingFilter>("todos");
+  const [postingFilter, setPostingFilter] = useState<PostingFilter>("posso");
 
-  const [view, setView] = useState<"cards" | "tabela">("cards");
+  const [view, setView] = useState<"cards" | "tabela" | "resumo">("resumo");
   const [detail, setDetail] = useState<RadarGroup | null>(null);
 
   const stageTimer = useRef<number | null>(null);
@@ -653,6 +654,15 @@ function RadarGruposPage() {
             <div className="ml-auto flex items-center gap-2">
               <div className="flex rounded-md border border-input">
                 <button
+                  onClick={() => setView("resumo")}
+                  className={cn(
+                    "flex items-center gap-1 rounded-md px-2 py-1.5 text-xs",
+                    view === "resumo" ? "bg-muted text-foreground" : "text-muted-foreground",
+                  )}
+                >
+                  <LayoutList className="size-3.5" /> Simples
+                </button>
+                <button
                   onClick={() => setView("cards")}
                   className={cn(
                     "flex items-center gap-1 rounded-md px-2 py-1.5 text-xs",
@@ -708,6 +718,45 @@ function RadarGruposPage() {
             hasSaved={gruposSalvos.length > 0}
             onSearch={() => runSearch()}
           />
+        ) : view === "resumo" ? (
+          <Card>
+            <CardContent className="p-0">
+              <ul className="divide-y divide-border">
+                {filtered.map((g) => (
+                  <li
+                    key={g.id}
+                    className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 hover:bg-muted/40"
+                  >
+                    <a
+                      href={g.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="min-w-0 flex-1 truncate text-sm font-medium text-foreground hover:text-primary"
+                      title={g.name}
+                    >
+                      {g.name}
+                    </a>
+                    <MemberBadge group={g} />
+                    {g.is_public == null ? (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    ) : (
+                      <Badge variant={g.is_public ? "secondary" : "destructive"}>
+                        {g.is_public ? "Público" : "Privado"}
+                      </Badge>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setDetail(g)}
+                      className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                      title="Ver detalhes"
+                    >
+                      Detalhes
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
         ) : view === "cards" ? (
           <div className="grid gap-3">
             {filtered.map((g) => (
