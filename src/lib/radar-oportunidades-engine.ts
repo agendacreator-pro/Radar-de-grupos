@@ -4,6 +4,8 @@ import {
   decodeEntities,
   expandTerms,
   getAdmin,
+  rotateWindow,
+  seededShuffle,
   sleep,
   verifyUser,
 } from "@/lib/radar-engine";
@@ -31,10 +33,12 @@ type PostRef = { slug: string; slugKey: string; postId: string };
 const MAX_TARGET_GROUPS = 10;
 const MAX_TARGET_TERMS = 6;
 const MAX_GENERIC_TERMS = 10;
-const MAX_GENERIC_INTENTS = 3;
+const MAX_GENERIC_INTENTS = 4;
 const MAX_PERSISTED = 200;
 
 // Frases típicas de quem está COMPRANDO — usadas para construir as consultas.
+// A cada busca uma janela rotativa diferente dessas frases é usada, para que
+// uma nova pesquisa descubra publicações novas (não repetir os mesmos top-20).
 const INTENT_PHRASES = [
   "procuro",
   "estou procurando",
@@ -44,6 +48,10 @@ const INTENT_PHRASES = [
   "quanto custa",
   "quem faz",
   "onde compro",
+  "alguém vende",
+  "procurando fornecedor",
+  "compro",
+  "preciso comprar",
 ] as const;
 
 function decodeEntitiesCustom(s: string): string {
@@ -199,7 +207,7 @@ async function tavilyPosts(q: string, key: string, days?: number): Promise<RawRo
         api_key: key,
         query: q,
         search_depth: "advanced",
-        max_results: 20,
+        max_results: 25,
         include_domains: ["facebook.com"],
         ...(days ? { days, sort_by: "recency" } : {}),
       }),
@@ -238,7 +246,7 @@ async function bravePosts(q: string, key: string, freshness?: string): Promise<R
   const timer = setTimeout(() => controller.abort(), 14_000);
   try {
     const res = await fetch(
-      `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(q)}&count=20&country=br${freshness ? `&search_freshness=${freshness}` : ""}`,
+      `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(q)}&count=25&country=br${freshness ? `&search_freshness=${freshness}` : ""}`,
       {
         signal: controller.signal,
         headers: { "X-Subscription-Token": key, Accept: "application/json" },
@@ -659,6 +667,8 @@ export const oportunidadesSearch = createServerFn({ method: "POST" })
       .slice(0, MAX_TARGET_GROUPS);
 
     // Consultas: dentro dos grupos salvos (alvo certo) ou em todo o Facebook.
+    // Janela rotativa de intenções + shuffle por busca → resultados novos.
+    const runSeed = Math.floor(Date.now() / 1000) * 4801 + terms.length * 7;
     const tasks: Array<{
       q: string;
       term: string;
@@ -669,7 +679,7 @@ export const oportunidadesSearch = createServerFn({ method: "POST" })
       for (const term of tTerms) {
         for (let gi = 0; gi < targeted.length; gi++) {
           const g = targeted[gi]!;
-          const intent = INTENT_PHRASES[(gi + tTerms.indexOf(term)) % INTENT_PHRASES.length];
+          const intent = INTENT_PHRASES[(gi + tTerms.indexOf(term) + runSeed) % INTENT_PHRASES.length];
           tasks.push({
             q: `site:facebook.com/groups/${g.slug} "${intent}" "${term}"`,
             term,
@@ -679,13 +689,14 @@ export const oportunidadesSearch = createServerFn({ method: "POST" })
       }
     } else {
       const tTerms = terms.slice(0, MAX_GENERIC_TERMS);
-      const intents = INTENT_PHRASES.slice(0, MAX_GENERIC_INTENTS);
+      const intents = rotateWindow(INTENT_PHRASES, MAX_GENERIC_INTENTS, runSeed);
       for (const term of tTerms) {
         for (const intent of intents) {
           tasks.push({ q: `site:facebook.com/groups "${intent}" "${term}"`, term });
         }
       }
     }
+    seededShuffle(tasks, runSeed);
     if (tasks.length === 0) {
       return { success: false, error: "Não há o que buscar. Escolha um nicho ou grupos salvos." };
     }

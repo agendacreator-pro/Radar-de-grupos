@@ -15,7 +15,7 @@ const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
 const MAX_TERMS = 10;
-const MAX_QUERIES = 42; // subrequests to search engines (Cloudflare free: ~50)
+const MAX_QUERIES = 44; // subrequests to search engines (Cloudflare free: ~50)
 const WALL_BUDGET_MS = 30_000;
 const DELAY_BETWEEN_QUERIES_MS = 950;
 
@@ -250,7 +250,7 @@ async function tavilySearch(q: string, key: string): Promise<SerpRow[]> {
         api_key: key,
         query: q,
         search_depth: "basic",
-        max_results: 20,
+        max_results: 25,
         include_domains: ["facebook.com"],
       }),
     });
@@ -282,7 +282,7 @@ async function braveSearch(q: string, key: string): Promise<SerpRow[]> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 14_000);
   try {
-    const res = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(q)}&count=20&country=br`, {
+    const res = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(q)}&count=25&country=br`, {
       signal: controller.signal,
       headers: { "X-Subscription-Token": key, Accept: "application/json" },
     });
@@ -411,7 +411,40 @@ function queryTemplates(term: string): string[] {
     `site:facebook.com/groups "${t}"`,
     `"${t}" facebook grupo membros`,
     `"${t}" mil membros facebook grupo`,
+    `"${t}" facebook grupo público`,
+    `"${t}" facebook grupo membros Brasil`,
+    `"${t}" grupo facebook membros`,
+    `site:facebook.com/groups "${t}" mil`,
+    `site:facebook.com/groups "${t}" membros`,
+    `"${t}" facebook grupo fechado`,
+    `facebook "${t}" grupos membros`,
+    `"${t}" facebook comunidade grupo`,
   ];
+}
+
+// Janela rotativa: pega `count` itens a partir de um offset derivado do seed.
+// Cada busca usa um offset diferente → consultas diferentes a cada rodada.
+export function rotateWindow<T>(arr: readonly T[], count: number, seed: number): T[] {
+  if (arr.length === 0) return [];
+  const start = Math.abs(Math.floor(seed));
+  const out: T[] = [];
+  for (let i = 0; i < count; i++) out.push(arr[(start + i) % arr.length]!);
+  return out;
+}
+
+// Embaralhamento determinístico por seed: mesma busca de novo = ordem igual.
+export function seededShuffle<T>(arr: T[], seed: number): T[] {
+  const out = [...arr];
+  let s = Math.abs(Math.floor(seed)) || 1;
+  for (let i = out.length - 1; i > 0; i--) {
+    s = (s * 1103515245 + 12345) % 2147483648;
+    const j = s % (i + 1);
+    const ti = out[i] as T;
+    const tj = out[j] as T;
+    out[i] = tj;
+    out[j] = ti;
+  }
+  return out;
 }
 
 // ---- relevance filter (keeps only groups tied to the niche) ----
@@ -698,10 +731,21 @@ export const radarSearch = createServerFn({ method: "POST" })
 
     // Todos os pares (termo, consulta) — templates focados em grupos/membros,
     // inclusive os grandes (snippets com "X mil/milhões de membros").
+    // A cada busca o ponto de partida do pool gira (Date.now) e as tasks são
+    // embaralhadas: consultas diferentes a cada rodada → grupos novos, não só
+    // repetição dos mesmos top-20 dos buscadores.
+    const runSeed = Math.floor(Date.now() / 1000) * 7919 + rawTerms.join("|").length * 31;
+    const TEMPLATES_PER_RUN = 4;
     const tasks: Array<{ term: string; q: string }> = [];
     for (const term of terms) {
-      for (const q of queryTemplates(term)) tasks.push({ term, q });
+      const tmpls = rotateWindow(
+        queryTemplates(term),
+        TEMPLATES_PER_RUN,
+        runSeed + term.length * 7 + terms.indexOf(term) * 13,
+      );
+      for (const q of tmpls) tasks.push({ term, q });
     }
+    seededShuffle(tasks, runSeed);
     const wallDeadline = t0 + WALL_BUDGET_MS;
 
     async function runTask(task: { term: string; q: string }) {
