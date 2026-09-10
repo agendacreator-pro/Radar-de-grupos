@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
   instaRadarAlertsMark,
+  instaRadarAudioPost,
   instaRadarAudioPreview,
   instaRadarContent,
   instaRadarDashboard,
@@ -130,6 +131,18 @@ export function useInstaRadarAudioPreview() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["instagram-radar"] });
+    },
+  });
+}
+
+export function useInstaRadarAudioPost() {
+  return useMutation({
+    mutationFn: async (id: string): Promise<InstaContent> => {
+      const token = await getToken();
+      const res = await instaRadarAudioPost({ data: { token, id } });
+      if (!res.success || !res.data)
+        throw new Error(res.error ?? "Falha ao montar o post do áudio");
+      return res.data.content;
     },
   });
 }

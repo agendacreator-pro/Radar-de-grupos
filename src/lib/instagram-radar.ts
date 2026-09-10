@@ -207,6 +207,23 @@ export type InstaContent = {
   score: number;
   fonte: "inferencia";
   motivo: string | null;
+  horarios?: string[];
+};
+
+export type InstaAudioPost = {
+  sugestao: string;
+  nome: string;
+  artista: string | null;
+  nome_reels: string;
+  preview_url: string | null;
+  artwork_url: string | null;
+  itunes_url: string | null;
+  score: number;
+  compat: number;
+  ciclo: InstaCiclo;
+  fonte: InstaFonte;
+  fonte_detalhe: string | null;
+  content: InstaContent;
 };
 
 export type InstaDashboard = {

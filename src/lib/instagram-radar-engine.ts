@@ -13,6 +13,7 @@ import {
   INSTA_GANCHOS,
   type InstaAlert,
   type InstaAudio,
+  type InstaAudioPost,
   type InstaCategoria,
   type InstaCiclo,
   type InstaConfig,
@@ -1045,6 +1046,103 @@ function buildContent(
 }
 
 // ============================================================
+// Post completo de áudio + horários de pico (estimativa honesta)
+// ============================================================
+
+const PEAK_POOL = [
+  "06:30 – 08:00",
+  "11:30 – 13:00",
+  "17:00 – 19:00",
+  "19:00 – 21:00",
+  "21:00 – 22:30",
+];
+
+function buildHorarios(): string[] {
+  const dias = ["dom", "seg", "ter", "qua", "qui", "sex", "sab"];
+  const start = Math.floor(Date.now() / 86_400_000) % PEAK_POOL.length;
+  return [1, 2, 3].map((i, idx) => {
+    const dia = dias[(new Date().getDay() + i) % 7] ?? "seg";
+    return `${dia} · ${PEAK_POOL[(start + idx) % PEAK_POOL.length] ?? ""}`;
+  });
+}
+
+function slugTag(s: string): string {
+  return s
+    .replace(/[^a-zA-Z0-9À-ú]+/g, "")
+    .slice(0, 28)
+    .toLowerCase();
+}
+
+function buildAudioPost(audio: InstaAudio, keywords: string[]): InstaAudioPost {
+  const tema = keywords.slice(0, 3).length ? keywords.slice(0, 3).join(", ") : "seu nicho";
+  const nome = (audio.track_name && audio.track_name.trim()) || audio.nome;
+  const artist = (audio.artist_name && audio.artist_name.trim()) || audio.artista;
+  const nomeLimpo = nome.replace(/^[\s🎵]+/, "");
+  const withArtist = artist ? ` — ${artist}` : "";
+  const daySeed = Math.floor(Date.now() / 86_400_000);
+  const gancho = INSTA_GANCHOS[daySeed % INSTA_GANCHOS.length] ?? INSTA_GANCHOS[0]!;
+  const objetivo = audio.ciclo === "auge" ? "Alcance" : "Engajamento + Conexão";
+
+  const legenda =
+    `O áudio "${nomeLimpo}"${withArtist} está subindo de verdade. 🎵 ` +
+    `Mostrei 3 formas de usar no ${tema} — pausa no refrão, transição e chamada no final. ` +
+    `Reproduza antes de gravar e marque o melhor momento da faixa.`;
+
+  return {
+    sugestao: `🎵 Post completo do áudio: ${nomeLimpo}`,
+    nome,
+    artista: artist,
+    nome_reels: nomeLimpo,
+    preview_url: audio.preview_url ?? null,
+    artwork_url: audio.artwork_url ?? null,
+    itunes_url: audio.itunes_url ?? null,
+    score: audio.score,
+    compat: audio.compat,
+    ciclo: audio.ciclo,
+    fonte: "inferencia",
+    fonte_detalhe:
+      "Post montado por regras (MEELL) a partir do áudio em alta observado — sem views/engajamento inventados.",
+    content: {
+      sugestao: `🎵 Post completo do áudio: ${nomeLimpo}`,
+      trend: null,
+      trend_url: null,
+      trend_ciclo: audio.ciclo,
+      audio: nomeLimpo,
+      formato: "Reels (áudio)",
+      gancho: gancho.nome,
+      ideia: `Grave um Reels com o áudio "${nomeLimpo}"${withArtist} aplicado ao ${tema}: entre no refrão e entregue o valor rápido.`,
+      texto_tela: `"${nomeLimpo}"${withArtist}`,
+      roteiro: [
+        `Abertura: comece JÁ no refrão de "${nomeLimpo}" (o momento que todo mundo espera) — não deixe passar mais de 1s.`,
+        `Encaixe: use o áudio "${nomeLimpo}"${withArtist} no contexto de ${tema} com uma cena que prende nos primeiros 3 segundos.`,
+        `Núcleo: 3 aplicações rápidas no ${tema} em sequência, com uma virada "antes → depois" para ritmo.`,
+        `Fechamento: mostre o resultado e chame para salvar — música em alta gera replay.`,
+      ],
+      legenda,
+      cta: "Salve este post para montar o vídeo e pesquisa o áudio pelo nome no editor de Reels.",
+      hashtags: [
+        ...keywords
+          .slice(0, 5)
+          .map((k) => `#${k.replace(/[^a-zA-Z0-9À-ú]+/g, "")}`),
+        `#${slugTag(nomeLimpo)}`,
+        ...(artist ? [`#${slugTag(artist)}`] : []),
+        "#reels",
+        "#instagramreels",
+        "#musicaemalta",
+        "#tendencia",
+      ].filter((h) => h.length > 2),
+      capa: `Capa: nome da música "${nomeLimpo}"${withArtist} em destaque, no estilo das capas de Reels em alta (foto + texto grande).`,
+      objetivo,
+      score: audio.score,
+      fonte: "inferencia",
+      motivo:
+        "Conteúdo gerado por regras (MEELL) a partir do áudio em alta observado — horários são estimativa de pico de engajamento (padrões gerais, não dado oficial).",
+      horarios: buildHorarios(),
+    },
+  };
+}
+
+// ============================================================
 // Server Functions
 // ============================================================
 
@@ -1064,6 +1162,7 @@ export type InstaPlanDeleteInput = { token: string; id: string };
 export type InstaContentInput = { token: string; trend_id?: string | undefined };
 export type InstaAlertsMarkInput = { token: string };
 export type InstaAudioPreviewInput = { token: string; id: string };
+export type InstaAudioPostInput = { token: string; id: string };
 
 export const instaRadarDashboard = createServerFn({ method: "GET" })
   .validator((d: InstaTokenInput) => d)
@@ -1348,6 +1447,56 @@ export const instaRadarAlertsMark = createServerFn({ method: "POST" })
       return { success: false, error: "Falha ao marcar alertas." };
     }
   });
+
+export const instaRadarAudioPost = createServerFn({ method: "POST" })
+  .validator((d: InstaAudioPostInput) => d)
+  .handler(
+    async ({
+      data,
+    }): Promise<{ success: boolean; error?: string; data?: InstaAudioPost }> => {
+      const userId = await verifyUser(data.token);
+      if (!userId) return { success: false, error: "Sessão expirada. Entre novamente." };
+      try {
+        const admin: any = await getAdmin();
+        const [audioRes, config] = await Promise.all([
+          admin
+            .from("insta_radar_audios")
+            .select("*")
+            .eq("id", data.id)
+            .eq("user_id", userId)
+            .single(),
+          loadConfig(userId),
+        ]);
+        const r: any = audioRes?.data;
+        if (!r) return { success: false, error: "Áudio não encontrado." };
+        const audio: InstaAudio = {
+          id: r.id,
+          nome: String(r.nome),
+          artista: r.artista ?? null,
+          usos: r.usos ?? null,
+          crescimento: r.crescimento ?? 0,
+          ciclo: r.ciclo ?? "crescendo",
+          score: r.score ?? 0,
+          compat: r.compat ?? 0,
+          motivo: r.motivo ?? null,
+          fonte: r.fonte ?? "observado",
+          fonte_detalhe: r.fonte_detalhe ?? null,
+          url: r.url ?? null,
+          coletado_em: r.coletado_em ?? null,
+          preview_url: r.preview_url ?? null,
+          artwork_url: r.artwork_url ?? null,
+          itunes_url: r.itunes_url ?? null,
+          track_name: r.track_name ?? null,
+          artist_name: r.artist_name ?? null,
+          enrich_attempted_at: r.enrich_attempted_at ?? null,
+        };
+        return { success: true, data: buildAudioPost(audio, config.keywords) };
+      } catch (err) {
+        console.error("[insta-radar] audio post:", err);
+        return { success: false, error: "Falha ao montar o post do áudio." };
+      }
+    },
+  );
 
 export const instaRadarAudioPreview = createServerFn({ method: "POST" })
   .validator((d: InstaAudioPreviewInput) => d)

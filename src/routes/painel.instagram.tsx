@@ -23,6 +23,8 @@ import {
   Tags,
   Trash2,
   TrendingUp,
+  Trophy,
+  Volume2,
   Wand2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -66,6 +68,7 @@ import {
   useInstaAlertsMark,
   useInstaPlanDelete,
   useInstaPlanSave,
+  useInstaRadarAudioPost,
   useInstaRadarAudioPreview,
   useInstaRadarContent,
   useInstaRadarRun,
@@ -220,12 +223,139 @@ function TrendCard({
   );
 }
 
+function speakNome(nome: string, artista?: string | null) {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(
+    `${artista ? `${artista}. ` : "Artista não identificado. "}${nome}.`,
+  );
+  u.lang = "pt-BR";
+  u.rate = 0.95;
+  window.speechSynthesis.speak(u);
+}
+
+function AudioRankRow({
+  a,
+  rank,
+  onPreview,
+  onPost,
+}: {
+  a: InstaAudio;
+  rank: number;
+  onPreview: (id: string) => Promise<InstaAudio | null>;
+  onPost: (id: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [playerUrl, setPlayerUrl] = useState<string | null>(null);
+  const nomeReels = (a.track_name && a.track_name.trim()) || a.nome;
+  const artistLabel = (a.artist_name && a.artist_name.trim()) || a.artista;
+
+  async function playNow() {
+    if (busy) return;
+    if (a.preview_url) {
+      setPlayerUrl(a.preview_url);
+      return;
+    }
+    setBusy(true);
+    try {
+      const updated = await onPreview(a.id);
+      if (updated?.preview_url) setPlayerUrl(updated.preview_url);
+      else toast.info("Prévia não encontrada para este nome.");
+    } catch {
+      toast.error("Não consegui buscar a prévia agora.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function copyName() {
+    void navigator.clipboard?.writeText(nomeReels);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <li className="flex flex-wrap items-center gap-2 py-2">
+      <span
+        className={cn(
+          "grid size-7 shrink-0 place-items-center rounded-full text-xs font-bold",
+          rank <= 3
+            ? "bg-gradient-to-br from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white"
+            : "bg-muted text-muted-foreground",
+        )}
+        title={`${rank}º mais ouvida em alta`}
+      >
+        {rank}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-semibold text-foreground">{nomeReels}</span>
+        <span className="block truncate text-xs text-muted-foreground">
+          🎤 {artistLabel ? artistLabel : "Artista não identificado"}
+          {a.score > 0 && (
+            <span className="ml-1.5">
+              · score {a.score}/100 · 🎯 compat {a.compat}%
+            </span>
+          )}
+        </span>
+      </span>
+      <span className="flex shrink-0 items-center gap-1">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 gap-1 px-2 text-xs"
+          onClick={() => void playNow()}
+          disabled={busy}
+          title="Buscar e reproduzir a música em alta"
+        >
+          {busy ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3" />}
+          Ouvir
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="size-7"
+          onClick={() => speakNome(nomeReels, artistLabel)}
+          title="Ler o nome da música e do artista em voz alta"
+        >
+          <Volume2 className="size-3.5" />
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="size-7"
+          onClick={copyName}
+          title="Copiar o nome para usar no editor de Reels"
+        >
+          {copied ? <Check className="size-3.5 text-green-600" /> : <Copy className="size-3.5" />}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 gap-1 px-2 text-xs"
+          onClick={() => onPost(a.id)}
+          title="Gera o post completo: legenda, hashtags, horários de pico e roteiro"
+        >
+          <Wand2 className="size-3" /> Post
+        </Button>
+      </span>
+      {playerUrl && (
+        <span className="w-full">
+          <audio className="w-full" src={playerUrl} controls autoPlay />
+        </span>
+      )}
+    </li>
+  );
+}
+
 function AudioCard({
   a,
   onPreview,
+  onPost,
 }: {
   a: InstaAudio;
   onPreview: (id: string) => Promise<InstaAudio | null>;
+  onPost: (id: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -349,6 +479,22 @@ function AudioCard({
                 )}
                 {copied ? "Nome copiado!" : "Copiar nome p/ Reels"}
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => speakNome(nomeReels, artistLabel)}
+                title="Ler o nome da música e do artista em voz alta"
+              >
+                <Volume2 className="size-3.5" /> Ler nome
+              </Button>
+              <Button
+                size="sm"
+                className="bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white hover:from-[#DD2A7B] hover:via-[#C13584] hover:to-[#962FBF]"
+                onClick={() => onPost(a.id)}
+                title="Gera o post completo deste áudio: legenda, hashtags, horários de pico e roteiro"
+              >
+                <Wand2 className="size-3.5" /> Criar post completo
+              </Button>
             </div>
           )}
           {notice && <p className="mt-2 text-[11px] text-muted-foreground">{notice}</p>}
@@ -412,6 +558,7 @@ function RadarInstagramPage() {
   const planDelete = useInstaPlanDelete();
   const alertsMark = useInstaAlertsMark();
   const audioPreview = useInstaRadarAudioPreview();
+  const audioPost = useInstaRadarAudioPost();
   const wipe = useInstaRadarWipe();
 
   const [kwInput, setKwInput] = useState("");
@@ -522,6 +669,17 @@ function RadarInstagramPage() {
       setContent(c);
     } catch (e) {
       toast.error("Falha ao gerar conteúdo.");
+      setContentDialog(false);
+    }
+  }
+
+  async function openAudioPost(id: string) {
+    setContentDialog(true);
+    try {
+      const c = await audioPost.mutateAsync(id);
+      setContent(c);
+    } catch (e) {
+      toast.error("Falha ao montar o post do áudio.");
       setContentDialog(false);
     }
   }
@@ -894,6 +1052,11 @@ function RadarInstagramPage() {
         <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
           <ListMusic className="size-5 text-[#E1306C]" />
           Áudios em alta
+          {audios.length > 0 && (
+            <span className="text-sm font-normal text-muted-foreground">
+              ({audios.length} músicas listadas)
+            </span>
+          )}
         </h2>
         {audios.length === 0 ? (
           <p className="mt-3 text-sm text-muted-foreground">
@@ -901,11 +1064,44 @@ function RadarInstagramPage() {
             de Reels é identificado por sinais públicos de "áudio em alta".
           </p>
         ) : (
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {audios.map((a) => (
-              <AudioCard key={a.id} a={a} onPreview={(id) => audioPreview.mutateAsync(id)} />
-            ))}
-          </div>
+          <>
+            {/* Ranking das mais ouvidas */}
+            <div className="mt-3 rounded-xl border border-border bg-card p-3 shadow-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="flex items-center gap-1.5 text-sm font-bold text-foreground">
+                  <Trophy className="size-4 text-[#E1306C]" />
+                  Ranking — músicas mais ouvidas em alta
+                </p>
+                <span className="text-[11px] text-muted-foreground">
+                  ordem pela tendência observada (1º = mais forte). Clique em “Ouvir” para
+                  reproduzir.
+                </span>
+              </div>
+              <ol className="mt-1 divide-y divide-border">
+                {audios.map((a, i) => (
+                  <AudioRankRow
+                    key={a.id}
+                    a={a}
+                    rank={i + 1}
+                    onPreview={(id) => audioPreview.mutateAsync(id)}
+                    onPost={(id) => openAudioPost(id)}
+                  />
+                ))}
+              </ol>
+            </div>
+
+            {/* Detalhe em cards */}
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {audios.map((a) => (
+                <AudioCard
+                  key={a.id}
+                  a={a}
+                  onPreview={(id) => audioPreview.mutateAsync(id)}
+                  onPost={(id) => openAudioPost(id)}
+                />
+              ))}
+            </div>
+          </>
         )}
       </section>
 
@@ -1447,6 +1643,24 @@ function ContentDialog({
               <p className="text-xs font-semibold text-muted-foreground">Capa</p>
               <p className="mt-1 text-sm text-foreground">{content.capa}</p>
             </div>
+            {content.horarios && content.horarios.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground">
+                  Horários de postagem em alta (estimativa de pico de engajamento)
+                </p>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {content.horarios.map((h) => (
+                    <Badge
+                      key={h}
+                      variant="outline"
+                      className="border-[#DD2A7B]/30 bg-[#E1306C]/5 text-[#E1306C]"
+                    >
+                      {h}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="flex flex-wrap gap-2">
               <Button
                 className="bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white hover:from-[#DD2A7B] hover:via-[#C13584] hover:to-[#962FBF]"
@@ -1467,6 +1681,9 @@ function ContentDialog({
                     `Legenda: ${content.legenda}`,
                     `CTA: ${content.cta}`,
                     `Hashtags: ${content.hashtags.join(" ")}`,
+                    `Horários de postagem em alta: ${
+                      content.horarios?.length ? content.horarios.join(" | ") : "não informado"
+                    }`,
                   ].join("\n");
                   void navigator.clipboard?.writeText(txt);
                   setCopied(true);
