@@ -75,6 +75,7 @@ const TAMANHOS = [10000, 50000, 100000, 200000, 500000, 1000000] as const;
 type Sort = "maiores" | "relevancia" | "recentes";
 type Visibilidade = "todos" | "publico";
 type StatusFilter = "todos" | RadarStatus;
+type PostingFilter = "todos" | "posso" | "permite" | "com_regra";
 
 const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "todos", label: "Todos" },
@@ -84,6 +85,90 @@ const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "membro", label: "Membro" },
   { value: "nao_interesse", label: "Sem interesse" },
 ];
+
+type PostingNivel = "sem_info" | "livre" | "regras" | "moderacao" | "ambos";
+
+// Sinais automáticos de regras de postagem lidos da descrição do grupo
+// (snippet que a busca do Facebook devolve). Não substitui a confirmação
+// manual nas regras do grupo — é um aviso honesto quando a descrição deixa
+// pistas de que a postagem pode ficar pendente ou ser reprovada.
+const POST_FORBID_RE: RegExp[] = [
+  /\bproibid[oa]\b/,
+  /\bnao\s+permitid/,
+  /\bsem\s+divulg/,
+  /\bdivulg.{0,12}proibid/,
+  /\bsem\s+spam\b/,
+  /\bnao\s+post(?:e|ar|a)\b/,
+  /\bvend.{0,12}proibid/,
+  /\bpromo.{0,12}proibid/,
+  /\bsilencio\b/,
+];
+const POST_CONTENT_RE: RegExp[] = [
+  /\bregr(?:a|as)\b/,
+  /\bregulamento\b/,
+  /\bnorma(?:s)?\b/,
+];
+const POST_APPROVAL_RE: RegExp[] = [
+  /\baprov(?:ad|ac)/,
+  /\bmoderad\b/,
+  /\bmoderador\b/,
+  /\bpendente\b/,
+  /\banalise\b/,
+];
+
+function grupoPostingInfo(group: Pick<RadarGroup, "description">): {
+  nivel: PostingNivel;
+  motivos: string[];
+} {
+  const raw = (group.description ?? "").trim();
+  if (!raw) return { nivel: "sem_info", motivos: [] };
+  const d = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  const forb = POST_FORBID_RE.some((re) => re.test(d));
+  const rules = POST_CONTENT_RE.some((re) => re.test(d));
+  const appr = POST_APPROVAL_RE.some((re) => re.test(d));
+  const motivos: string[] = [];
+  if (forb) motivos.push("descrição proíbe divulgação/promoção");
+  if (rules) motivos.push("descrição menciona regras de postagem");
+  if (appr) motivos.push("posts passam por aprovação/moderação");
+  if ((forb || rules) && appr) return { nivel: "ambos", motivos };
+  if (forb || rules) return { nivel: "regras", motivos };
+  if (appr) return { nivel: "moderacao", motivos };
+  return { nivel: "livre", motivos };
+}
+
+function PostingBadges({ group }: { group: RadarGroup }) {
+  const info = grupoPostingInfo(group);
+  if (info.nivel === "sem_info") {
+    return (
+      <Badge variant="outline" className="text-muted-foreground" title="Sem descrição visível para avaliar regras">
+        Sem descrição para avaliar
+      </Badge>
+    );
+  }
+  const reason = info.motivos.join("; ");
+  if (info.nivel === "ambos" || info.nivel === "regras") {
+    return (
+      <Badge variant="destructive" title={reason}>
+        Possíveis regras de postagem
+      </Badge>
+    );
+  }
+  if (info.nivel === "moderacao") {
+    return (
+      <Badge variant="secondary" title={reason}>
+        Posts passam por moderação
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="outline" className="border-green-300 bg-green-50 text-green-700">
+      Sem sinal de regra na descrição
+    </Badge>
+  );
+}
 
 function RadarGruposPage() {
   const queryClient = useQueryClient();
@@ -109,6 +194,7 @@ function RadarGruposPage() {
   const [sort, setSort] = useState<Sort>("maiores");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("todos");
   const [countryFilter, setCountryFilter] = useState<string>("todos");
+  const [postingFilter, setPostingFilter] = useState<PostingFilter>("todos");
 
   const [view, setView] = useState<"cards" | "tabela">("cards");
   const [detail, setDetail] = useState<RadarGroup | null>(null);
@@ -129,6 +215,22 @@ function RadarGruposPage() {
     if (visibilidade === "publico") list = list.filter((g) => g.is_public === true);
     if (statusFilter !== "todos") list = list.filter((g) => g.status === statusFilter);
     if (countryFilter !== "todos") list = list.filter((g) => g.country === countryFilter);
+    if (postingFilter === "posso") {
+      list = list.filter((g) => {
+        const nivel = grupoPostingInfo(g).nivel;
+        return (
+          g.is_public === true &&
+          (nivel === "livre" || (g.permite_divulgacao && nivel !== "regras" && nivel !== "ambos"))
+        );
+      });
+    } else if (postingFilter === "permite") {
+      list = list.filter((g) => g.permite_divulgacao);
+    } else if (postingFilter === "com_regra") {
+      list = list.filter((g) => {
+        const nivel = grupoPostingInfo(g).nivel;
+        return nivel === "regras" || nivel === "moderacao" || nivel === "ambos";
+      });
+    }
     const arr = [...list];
     if (sort === "maiores") {
       arr.sort((a, b) => (b.member_count ?? -1) - (a.member_count ?? -1));
@@ -143,7 +245,7 @@ function RadarGruposPage() {
       });
     }
     return arr;
-  }, [baseGroups, minMembers, visibilidade, statusFilter, countryFilter, sort]);
+  }, [baseGroups, minMembers, visibilidade, statusFilter, countryFilter, sort, postingFilter]);
 
   async function runSearch(preset?: string) {
     const termo = (preset ?? term).trim();
@@ -293,8 +395,11 @@ function RadarGruposPage() {
     const maiores = gruposSalvos.filter(
       (g) => g.member_count != null && g.member_count >= 100000,
     ).length;
-    const membro = gruposSalvos.filter((g) => g.status === "membro").length;
-    return { total, favoritos, maiores, membro };
+    const publicaveis = gruposSalvos.filter((g) => {
+      const nivel = grupoPostingInfo(g).nivel;
+      return g.is_public === true && (nivel === "livre" || g.permite_divulgacao);
+    }).length;
+    return { total, favoritos, maiores, publicaveis };
   }, [gruposSalvos]);
 
   return (
@@ -333,9 +438,9 @@ function RadarGruposPage() {
       <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
           { label: "Grupos salvos", value: stats.total, icon: Users },
+          { label: "Posso postar", value: stats.publicaveis, icon: Megaphone },
           { label: "Favoritos", value: stats.favoritos, icon: Star },
           { label: "100k+ membros", value: stats.maiores, icon: Radar },
-          { label: "Sou membro", value: stats.membro, icon: CheckCircle2 },
         ].map((s) => (
           <Card key={s.label} className="bg-card">
             <CardContent className="flex items-center gap-3 p-4">
@@ -465,6 +570,46 @@ function RadarGruposPage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-muted-foreground">Posso postar:</span>
+              <div className="flex flex-wrap gap-1">
+                <Button
+                  size="sm"
+                  variant={postingFilter === "todos" ? "secondary" : "ghost"}
+                  onClick={() => setPostingFilter("todos")}
+                >
+                  Todos
+                </Button>
+                <Button
+                  size="sm"
+                  variant={postingFilter === "posso" ? "secondary" : "ghost"}
+                  title="Grupo público SEM sinal de regra de postagem na descrição (ou que você marcou como permitindo divulgação)"
+                  onClick={() => setPostingFilter(postingFilter === "posso" ? "todos" : "posso")}
+                >
+                  Público e livre
+                </Button>
+                <Button
+                  size="sm"
+                  variant={postingFilter === "permite" ? "secondary" : "ghost"}
+                  title="Grupos que você marcou como permitindo divulgação"
+                  onClick={() => setPostingFilter(postingFilter === "permite" ? "todos" : "permite")}
+                >
+                  Permite divulgação (marcado)
+                </Button>
+                <Button
+                  size="sm"
+                  variant={postingFilter === "com_regra" ? "secondary" : "ghost"}
+                  title="Descrição cita regras, proibição de divulgação ou aprovação de posts — evite ou confirme antes"
+                  onClick={() => setPostingFilter(postingFilter === "com_regra" ? "todos" : "com_regra")}
+                >
+                  Com sinal de regra
+                </Button>
+              </div>
+              <p className="max-w-[32rem] text-[11px] text-muted-foreground">
+                Sinal lido da descrição que a busca do Facebook devolveu. Ainda assim, abra o grupo e
+                confira as regras antes de postar.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
               <span className="text-xs font-medium text-muted-foreground">Ordenar:</span>
               <select
                 value={sort}
@@ -585,6 +730,7 @@ function RadarGruposPage() {
                     <th className="px-3 py-2 font-medium">Grupo</th>
                     <th className="px-3 py-2 font-medium">Membros</th>
                     <th className="px-3 py-2 font-medium">Visibilidade</th>
+                    <th className="px-3 py-2 font-medium">Postagem</th>
                     <th className="px-3 py-2 font-medium">País</th>
                     <th className="px-3 py-2 font-medium">Status</th>
                     <th className="px-3 py-2 font-medium">Ações</th>
@@ -722,6 +868,14 @@ function GroupCard({
                 <Tags className="size-3" /> {group.categoria}
               </div>
             )}
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <PostingBadges group={group} />
+              {group.permite_divulgacao && (
+                <Badge variant="outline" className="border-green-300 bg-green-50 text-green-700">
+                  <Megaphone className="mr-1 size-3" /> Permite divulgação (marcado)
+                </Badge>
+              )}
+            </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <button
@@ -818,20 +972,28 @@ function TableRow({
           <span className="text-xs text-muted-foreground">Não confirmado</span>
         )}
       </td>
-      <td className="px-3 py-2.5">
-        {group.is_public == null ? (
-          <span className="text-xs text-muted-foreground">—</span>
-        ) : (
-          <Badge variant={group.is_public ? "secondary" : "destructive"}>
-            {group.is_public ? "Público" : "Privado"}
+<td className="px-3 py-2.5">
+          {group.is_public == null ? (
+            <span className="text-xs text-muted-foreground">—</span>
+          ) : (
+            <Badge variant={group.is_public ? "secondary" : "destructive"}>
+              {group.is_public ? "Público" : "Privado"}
+            </Badge>
+          )}
+        </td>
+        <td className="px-3 py-2.5">
+          <PostingBadges group={group} />
+          {group.permite_divulgacao && (
+            <span className="ml-1 inline-flex items-center gap-1 text-[11px] text-green-700">
+              <Megaphone className="size-3" /> marcado
+            </span>
+          )}
+        </td>
+        <td className="px-3 py-2.5">
+          <Badge variant="outline" className="border-primary/30 bg-primary/5 text-primary">
+            {formatCountry(group.country)}
           </Badge>
-        )}
-      </td>
-      <td className="px-3 py-2.5">
-        <Badge variant="outline" className="border-primary/30 bg-primary/5 text-primary">
-          {formatCountry(group.country)}
-        </Badge>
-      </td>
+        </td>
       <td className="px-3 py-2.5">
         <div className="flex flex-col items-start gap-1">
           <Badge className={RADAR_STATUS_CLASSES[group.status]}>
@@ -988,6 +1150,22 @@ function GroupsDetailDialog({
         </DialogHeader>
 
         {group.description && <p className="text-sm text-muted-foreground">{group.description}</p>}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <PostingBadges group={group} />
+          {group.permite_divulgacao && (
+            <Badge variant="outline" className="border-green-300 bg-green-50 text-green-700">
+              <Megaphone className="mr-1 size-3" /> Você marcou que permite divulgação
+            </Badge>
+          )}
+        </div>
+        {grupoPostingInfo(group).motivos.length > 0 && (
+          <ul className="list-disc pl-5 text-xs text-muted-foreground">
+            {grupoPostingInfo(group).motivos.map((m) => (
+              <li key={m}>{m}</li>
+            ))}
+          </ul>
+        )}
 
         <div className="flex items-center gap-2">
           <a
