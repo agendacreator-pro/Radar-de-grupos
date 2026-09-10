@@ -141,11 +141,12 @@ function grupoPostingInfo(group: Pick<RadarGroup, "description">): {
   return { nivel: "livre", motivos };
 }
 
-function PostingBadges({ group }: { group: RadarGroup }) {
+function PostingBadges({ group, compact = false }: { group: RadarGroup; compact?: boolean }) {
   const info = grupoPostingInfo(group);
+  const cls = compact ? "min-w-0 truncate" : "";
   if (info.nivel === "sem_info") {
     return (
-      <Badge variant="outline" className="text-muted-foreground" title="Sem descrição visível para avaliar regras">
+      <Badge variant="outline" className={cn("text-muted-foreground", cls)} title="Sem descrição visível para avaliar regras">
         Sem descrição para avaliar
       </Badge>
     );
@@ -153,20 +154,20 @@ function PostingBadges({ group }: { group: RadarGroup }) {
   const reason = info.motivos.join("; ");
   if (info.nivel === "ambos" || info.nivel === "regras") {
     return (
-      <Badge variant="destructive" title={reason}>
+      <Badge variant="destructive" className={cls} title={reason}>
         Possíveis regras de postagem
       </Badge>
     );
   }
   if (info.nivel === "moderacao") {
     return (
-      <Badge variant="secondary" title={reason}>
+      <Badge variant="secondary" className={cls} title={reason}>
         Posts passam por moderação
       </Badge>
     );
   }
   return (
-    <Badge variant="outline" className="border-green-300 bg-green-50 text-green-700">
+    <Badge variant="outline" className={cn("border-green-300 bg-green-50 text-green-700", cls)}>
       Sem sinal de regra na descrição
     </Badge>
   );
@@ -916,8 +917,17 @@ function RadarGruposPage() {
           </div>
         ) : (
           <Card>
-            <CardContent className="overflow-x-auto p-0">
-              <table className="w-full text-left text-sm">
+            <CardContent className="p-0">
+              <table className="w-full table-fixed text-left text-sm">
+                <colgroup>
+                  <col className="w-[30%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[11%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[10%]" />
+                </colgroup>
                 <thead>
                   <tr className="border-b border-border text-xs text-muted-foreground">
                     <th className="px-3 py-2 font-medium">Grupo</th>
@@ -926,7 +936,7 @@ function RadarGruposPage() {
                     <th className="px-3 py-2 font-medium">Postagem</th>
                     <th className="px-3 py-2 font-medium">País</th>
                     <th className="px-3 py-2 font-medium">Status</th>
-                    <th className="px-3 py-2 font-medium">Ações</th>
+                    <th className="px-3 py-2 text-right font-medium">Ações</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1150,44 +1160,46 @@ function TableRow({
   onStatus: (s: RadarStatus) => void;
   onRecheck: () => void;
 }) {
-  return (
+return (
     <tr className="border-b border-border last:border-0 hover:bg-muted/40" onClick={onOpen}>
-      <td className="max-w-[14rem] px-3 py-2.5">
+      <td className="min-w-0 overflow-hidden px-3 py-2.5">
         <div className="truncate font-medium text-foreground">{group.name}</div>
         {group.categoria && (
           <div className="truncate text-xs text-muted-foreground">{group.categoria}</div>
         )}
       </td>
-      <td className="px-3 py-2.5">
+      <td className="min-w-0 overflow-hidden px-3 py-2.5">
         {group.member_count != null ? (
           <span className="font-medium">{formatMemberCount(group)}</span>
         ) : (
           <span className="text-xs text-muted-foreground">Não confirmado</span>
         )}
       </td>
-<td className="px-3 py-2.5">
-          {group.is_public == null ? (
-            <span className="text-xs text-muted-foreground">—</span>
-          ) : (
-            <Badge variant={group.is_public ? "secondary" : "destructive"}>
-              {group.is_public ? "Público" : "Privado"}
-            </Badge>
-          )}
-        </td>
-        <td className="px-3 py-2.5">
-          <PostingBadges group={group} />
+      <td className="min-w-0 overflow-hidden px-3 py-2.5">
+        {group.is_public == null ? (
+          <span className="text-xs text-muted-foreground">—</span>
+        ) : (
+          <Badge variant={group.is_public ? "secondary" : "destructive"}>
+            {group.is_public ? "Público" : "Privado"}
+          </Badge>
+        )}
+      </td>
+      <td className="min-w-0 overflow-hidden px-3 py-2.5">
+        <div className="flex min-w-0 items-center gap-1">
+          <PostingBadges group={group} compact />
           {group.permite_divulgacao && (
-            <span className="ml-1 inline-flex items-center gap-1 text-[11px] text-green-700">
-              <Megaphone className="size-3" /> marcado
+            <span className="shrink-0 truncate text-[11px] text-green-700">
+              <Megaphone className="mr-0.5 inline size-3" /> marcado
             </span>
           )}
-        </td>
-        <td className="px-3 py-2.5">
-          <Badge variant="outline" className="border-primary/30 bg-primary/5 text-primary">
-            {formatCountry(group.country)}
-          </Badge>
-        </td>
-      <td className="px-3 py-2.5">
+        </div>
+      </td>
+      <td className="min-w-0 overflow-hidden px-3 py-2.5">
+        <Badge variant="outline" className="border-primary/30 bg-primary/5 text-primary">
+          {formatCountry(group.country)}
+        </Badge>
+      </td>
+      <td className="min-w-0 overflow-hidden px-3 py-2.5">
         <div className="flex flex-col items-start gap-1">
           <Badge className={RADAR_STATUS_CLASSES[group.status]}>
             {RADAR_STATUS_LABELS[group.status]}
@@ -1195,8 +1207,8 @@ function TableRow({
           <MemberChip group={group} onChange={onStatus} />
         </div>
       </td>
-      <td className="px-3 py-2.5">
-        <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+      <td className="min-w-0 overflow-hidden px-3 py-2.5">
+        <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
           <a
             href={group.url}
             target="_blank"
