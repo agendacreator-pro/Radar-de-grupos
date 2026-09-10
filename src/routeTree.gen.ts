@@ -14,6 +14,7 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as DbgRouteImport } from './routes/dbg'
 import { Route as PainelRouteImport } from './routes/painel'
 import { Route as PainelGruposRouteImport } from './routes/painel.grupos'
+import { Route as PainelInstagramRouteImport } from './routes/painel.instagram'
 import { Route as PainelOportunidadesRouteImport } from './routes/painel.oportunidades'
 
 const IndexRoute = IndexRouteImport.update({
@@ -41,6 +42,11 @@ const PainelGruposRoute = PainelGruposRouteImport.update({
   path: '/grupos',
   getParentRoute: () => PainelRoute,
 } as any)
+const PainelInstagramRoute = PainelInstagramRouteImport.update({
+  id: '/instagram',
+  path: '/instagram',
+  getParentRoute: () => PainelRoute,
+} as any)
 const PainelOportunidadesRoute = PainelOportunidadesRouteImport.update({
   id: '/oportunidades',
   path: '/oportunidades',
@@ -53,6 +59,7 @@ export interface FileRoutesByFullPath {
   '/dbg': typeof DbgRoute
   '/painel': typeof PainelRouteWithChildren
   '/painel/grupos': typeof PainelGruposRoute
+  '/painel/instagram': typeof PainelInstagramRoute
   '/painel/oportunidades': typeof PainelOportunidadesRoute
 }
 export interface FileRoutesByTo {
@@ -61,6 +68,7 @@ export interface FileRoutesByTo {
   '/dbg': typeof DbgRoute
   '/painel': typeof PainelRouteWithChildren
   '/painel/grupos': typeof PainelGruposRoute
+  '/painel/instagram': typeof PainelInstagramRoute
   '/painel/oportunidades': typeof PainelOportunidadesRoute
 }
 export interface FileRoutesById {
@@ -70,6 +78,7 @@ export interface FileRoutesById {
   '/dbg': typeof DbgRoute
   '/painel': typeof PainelRouteWithChildren
   '/painel/grupos': typeof PainelGruposRoute
+  '/painel/instagram': typeof PainelInstagramRoute
   '/painel/oportunidades': typeof PainelOportunidadesRoute
 }
 export interface FileRouteTypes {
@@ -80,6 +89,7 @@ export interface FileRouteTypes {
     | '/dbg'
     | '/painel'
     | '/painel/grupos'
+    | '/painel/instagram'
     | '/painel/oportunidades'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -88,6 +98,7 @@ export interface FileRouteTypes {
     | '/dbg'
     | '/painel'
     | '/painel/grupos'
+    | '/painel/instagram'
     | '/painel/oportunidades'
   id:
     | '__root__'
@@ -96,6 +107,7 @@ export interface FileRouteTypes {
     | '/dbg'
     | '/painel'
     | '/painel/grupos'
+    | '/painel/instagram'
     | '/painel/oportunidades'
   fileRoutesById: FileRoutesById
 }
@@ -143,6 +155,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PainelGruposRouteImport
       parentRoute: typeof PainelRoute
     }
+    '/painel/instagram': {
+      id: '/painel/instagram'
+      path: '/instagram'
+      fullPath: '/painel/instagram'
+      preLoaderRoute: typeof PainelInstagramRouteImport
+      parentRoute: typeof PainelRoute
+    }
     '/painel/oportunidades': {
       id: '/painel/oportunidades'
       path: '/oportunidades'
@@ -155,11 +174,13 @@ declare module '@tanstack/react-router' {
 
 interface PainelRouteChildren {
   PainelGruposRoute: typeof PainelGruposRoute
+  PainelInstagramRoute: typeof PainelInstagramRoute
   PainelOportunidadesRoute: typeof PainelOportunidadesRoute
 }
 
 const PainelRouteChildren: PainelRouteChildren = {
   PainelGruposRoute: PainelGruposRoute,
+  PainelInstagramRoute: PainelInstagramRoute,
   PainelOportunidadesRoute: PainelOportunidadesRoute,
 }
 

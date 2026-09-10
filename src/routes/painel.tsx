@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { createFileRoute, Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
-import { Loader2, LogOut, Radar, ShoppingBag } from "lucide-react";
+import { Loader2, LogOut, Radar, ShoppingBag, Instagram } from "lucide-react";
 
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -33,6 +33,7 @@ function PainelLayout() {
   const tabs = [
     { to: "/painel/grupos", label: "Grupos", icon: Radar },
     { to: "/painel/oportunidades", label: "Oportunidades", icon: ShoppingBag },
+    { to: "/painel/instagram", label: "Instagram", icon: Instagram },
   ] as const;
 
   return (
