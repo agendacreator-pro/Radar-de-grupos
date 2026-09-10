@@ -141,6 +141,11 @@ function grupoPostingInfo(group: Pick<RadarGroup, "description">): {
   return { nivel: "livre", motivos };
 }
 
+// Grade da tabela de grupos: colunas proporcionais ao espaço disponível,
+// textos quebram na palavra (nunca cortados) e nada rola para o lado.
+const TABLE_GRID =
+  "grid grid-cols-[minmax(0,1.6fr)_minmax(0,0.6fr)_minmax(0,0.7fr)_minmax(0,1.4fr)_minmax(0,0.7fr)_minmax(0,1.2fr)_auto] items-center gap-x-4";
+
 function PostingBadges({ group, compact = false }: { group: RadarGroup; compact?: boolean }) {
   const info = grupoPostingInfo(group);
   const cls = compact ? "min-w-0 truncate" : "";
@@ -928,40 +933,32 @@ function RadarGruposPage() {
         ) : (
           <Card>
             <CardContent className="p-0">
-              <table className="w-full table-fixed text-left text-sm">
-                <colgroup>
-                  <col className="w-[30%]" />
-                  <col className="w-[10%]" />
-                  <col className="w-[11%]" />
-                  <col className="w-[18%]" />
-                  <col className="w-[9%]" />
-                  <col className="w-[12%]" />
-                  <col className="w-[10%]" />
-                </colgroup>
-                <thead>
-                  <tr className="border-b border-border text-xs text-muted-foreground">
-                    <th className="px-3 py-2 font-medium">Grupo</th>
-                    <th className="px-3 py-2 font-medium">Membros</th>
-                    <th className="px-3 py-2 font-medium">Visibilidade</th>
-                    <th className="px-3 py-2 font-medium">Postagem</th>
-                    <th className="px-3 py-2 font-medium">País</th>
-                    <th className="px-3 py-2 font-medium">Status</th>
-                    <th className="px-3 py-2 text-right font-medium">Ações</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((g) => (
-                    <TableRow
-                      key={g.id}
-                      group={g}
-                      onOpen={() => setDetail(g)}
-                      onFavorito={() => toggleFavorito(g)}
-                      onStatus={(s) => changeStatus(g, s)}
-                      onRecheck={() => handleRecheck(g)}
-                    />
-                  ))}
-                </tbody>
-              </table>
+              <div
+                className={cn(
+                  TABLE_GRID,
+                  "border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground",
+                )}
+              >
+                <div className="min-w-0 px-1">Grupo</div>
+                <div className="min-w-0 px-1">Membros</div>
+                <div className="min-w-0 px-1">Visibilidade</div>
+                <div className="min-w-0 px-1">Postagem</div>
+                <div className="min-w-0 px-1">País</div>
+                <div className="min-w-0 px-1">Status</div>
+                <div className="min-w-0 px-1 text-right">Ações</div>
+              </div>
+              <div>
+                {filtered.map((g) => (
+                  <TableRow
+                    key={g.id}
+                    group={g}
+                    onOpen={() => setDetail(g)}
+                    onFavorito={() => toggleFavorito(g)}
+                    onStatus={(s) => changeStatus(g, s)}
+                    onRecheck={() => handleRecheck(g)}
+                  />
+                ))}
+              </div>
             </CardContent>
           </Card>
         )}
@@ -1033,7 +1030,7 @@ function MemberChip({
         void onChange(isMember ? "salvo" : "membro");
       }}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
         isMember
           ? "border-green-300 bg-green-100 text-green-700"
           : "border-border bg-muted text-muted-foreground hover:border-primary/40",
@@ -1171,21 +1168,28 @@ function TableRow({
   onRecheck: () => void;
 }) {
 return (
-    <tr className="border-b border-border last:border-0 hover:bg-muted/40" onClick={onOpen}>
-      <td className="min-w-0 overflow-hidden px-3 py-2.5">
-        <div className="truncate font-medium text-foreground">{group.name}</div>
+    <div
+      role="row"
+      onClick={onOpen}
+      className={cn(
+        TABLE_GRID,
+        "border-b border-border px-3 last:border-0 hover:bg-muted/40",
+      )}
+    >
+      <div className="min-w-0 px-1 py-2.5">
+        <div className="break-words font-medium text-foreground">{group.name}</div>
         {group.categoria && (
-          <div className="truncate text-xs text-muted-foreground">{group.categoria}</div>
+          <div className="break-words text-xs text-muted-foreground">{group.categoria}</div>
         )}
-      </td>
-      <td className="min-w-0 overflow-hidden px-3 py-2.5">
+      </div>
+      <div className="min-w-0 px-1 py-2.5">
         {group.member_count != null ? (
           <span className="font-medium">{formatMemberCount(group)}</span>
         ) : (
           <span className="text-xs text-muted-foreground">Não confirmado</span>
         )}
-      </td>
-      <td className="min-w-0 overflow-hidden px-3 py-2.5">
+      </div>
+      <div className="min-w-0 px-1 py-2.5">
         {group.is_public == null ? (
           <span className="text-xs text-muted-foreground">—</span>
         ) : (
@@ -1193,31 +1197,31 @@ return (
             {group.is_public ? "Público" : "Privado"}
           </Badge>
         )}
-      </td>
-      <td className="min-w-0 overflow-hidden px-3 py-2.5">
-        <div className="flex min-w-0 items-center gap-1">
-          <PostingBadges group={group} compact />
+      </div>
+      <div className="min-w-0 px-1 py-2.5">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <PostingBadges group={group} />
           {group.permite_divulgacao && (
-            <span className="shrink-0 truncate text-[11px] text-green-700">
+            <span className="whitespace-nowrap text-[11px] text-green-700">
               <Megaphone className="mr-0.5 inline size-3" /> marcado
             </span>
           )}
         </div>
-      </td>
-      <td className="min-w-0 overflow-hidden px-3 py-2.5">
+      </div>
+      <div className="min-w-0 px-1 py-2.5">
         <Badge variant="outline" className="border-primary/30 bg-primary/5 text-primary">
           {formatCountry(group.country)}
         </Badge>
-      </td>
-      <td className="min-w-0 overflow-hidden px-3 py-2.5">
+      </div>
+      <div className="min-w-0 px-1 py-2.5">
         <div className="flex flex-col items-start gap-1">
           <Badge className={RADAR_STATUS_CLASSES[group.status]}>
             {RADAR_STATUS_LABELS[group.status]}
           </Badge>
           <MemberChip group={group} onChange={onStatus} />
         </div>
-      </td>
-      <td className="min-w-0 overflow-hidden px-3 py-2.5">
+      </div>
+      <div className="min-w-0 px-1 py-2.5">
         <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
           <a
             href={group.url}
@@ -1248,8 +1252,8 @@ return (
             </button>
           )}
         </div>
-      </td>
-    </tr>
+      </div>
+    </div>
   );
 }
 
