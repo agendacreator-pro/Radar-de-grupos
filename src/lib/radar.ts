@@ -154,16 +154,21 @@ export type RecheckResult = {
 };
 
 export const RADAR_SUGGESTED_TERMS = [
+  "miolo de agenda",
+  "agenda 2027",
   "papelaria personalizada",
-  "encadernação",
-  "agendas personalizadas",
-  "planners",
+  "arquivos digitais",
+  "agenda personalizada",
+  "papelaria digital",
   "kits digitais",
-  "artesanato",
+  "encadernação",
+  "planners",
   "papelaria criativa",
+  "artesanato",
   "sublimação",
   "caderno personalizado",
   "scrapbooking",
+  "papelaria",
 ];
 
 export function formatMemberCount(group: Pick<RadarGroup, "member_count" | "member_raw">) {
