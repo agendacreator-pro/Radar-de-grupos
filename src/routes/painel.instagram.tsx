@@ -5,7 +5,9 @@ import {
   ArrowUp,
   Box,
   Calendar,
+  Check,
   CheckCircle2,
+  Copy,
   ExternalLink,
   Flame,
   Info,
@@ -13,6 +15,7 @@ import {
   ListMusic,
   Loader2,
   MessageSquare,
+  Music2,
   Play,
   Radar,
   RefreshCw,
@@ -63,6 +66,7 @@ import {
   useInstaAlertsMark,
   useInstaPlanDelete,
   useInstaPlanSave,
+  useInstaRadarAudioPreview,
   useInstaRadarContent,
   useInstaRadarRun,
   useInstaRadarWipe,
@@ -216,23 +220,141 @@ function TrendCard({
   );
 }
 
-function AudioCard({ a }: { a: InstaAudio }) {
+function AudioCard({
+  a,
+  onPreview,
+}: {
+  a: InstaAudio;
+  onPreview: (id: string) => Promise<InstaAudio | null>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [play, setPlay] = useState(false);
+
+  const nomeReels = (a.track_name && a.track_name.trim()) || a.nome;
+  const artistLabel = (a.artist_name && a.artist_name.trim()) || a.artista;
+  const preview = a.preview_url;
+
+  async function handlePlay() {
+    if (preview) {
+      setPlay(true);
+      setNotice(null);
+      return;
+    }
+    if (busy) return;
+    setBusy(true);
+    try {
+      const updated = await onPreview(a.id);
+      if (updated?.preview_url) {
+        setPlay(true);
+        setNotice(null);
+      } else {
+        setNotice(
+          "Prévia não encontrada para esse nome — use os links abaixo para localizar o áudio e pesquisar no editor de Reels.",
+        );
+      }
+    } catch {
+      setNotice("Não consegui buscar a prévia agora. Tente de novo em instantes.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function copyName() {
+    void navigator.clipboard?.writeText(nomeReels);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  const ytSearch = `https://www.youtube.com/results?search_query=${encodeURIComponent(
+    `${nomeReels}${artistLabel ? ` ${artistLabel}` : ""}`,
+  )}`;
+
   return (
-    <Card>
+    <Card className="overflow-hidden">
       <CardContent className="p-4">
         <div className="flex flex-wrap items-center gap-1.5">
           <Badge className={INSTA_CICLO_CLASSES[a.ciclo]}>{INSTA_CICLO_LABELS[a.ciclo]}</Badge>
           <FonteBadge fonte={a.fonte} detalhe={a.fonte_detalhe} />
         </div>
-        <p className="mt-1.5 flex items-center gap-1 text-sm font-semibold text-foreground">
-          <ListMusic className="size-4 text-[#E1306C]" /> {a.nome}
-        </p>
-        <div className="mt-2 space-y-1 text-xs text-muted-foreground">
-          {a.artista ? (
-            <p className="text-[13px]">🎤 {a.artista}</p>
+
+        <div className="mt-2 flex items-start gap-3">
+          {a.artwork_url ? (
+            <img
+              src={a.artwork_url}
+              alt={`Capa de ${nomeReels}`}
+              className="size-14 shrink-0 rounded-lg object-cover ring-1 ring-border"
+              loading="lazy"
+            />
           ) : (
-            <p>Artista: dado não disponível</p>
+            <span className="grid size-14 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-[#F58529] via-[#DD2A7B] to-[#8134AF]">
+              <Music2 className="size-6 text-white" />
+            </span>
           )}
+          <div className="min-w-0 flex-1">
+            <p className="flex items-start gap-1.5 break-words text-sm font-bold text-foreground">
+              <ListMusic className="mt-0.5 size-4 shrink-0 text-[#E1306C]" />
+              {nomeReels}
+              {a.track_name && a.track_name.trim() !== a.nome && (
+                <span
+                  className="rounded bg-muted px-1 py-0.5 text-[10px] font-normal text-muted-foreground"
+                  title={`Nome encontrado nos sinais públicos: ${a.nome}`}
+                >
+                  {a.nome.slice(0, 40)}
+                </span>
+              )}
+            </p>
+            <p className="mt-0.5 text-[13px] text-muted-foreground">
+              🎤 {artistLabel ? artistLabel : "Artista não identificado"}
+            </p>
+          </div>
+        </div>
+
+        {/* Player */}
+        <div className="mt-3">
+          {play && preview ? (
+            <audio className="w-full" src={preview} controls preload="none" autoPlay />
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-[#E1306C]/40 text-[#E1306C] hover:bg-[#E1306C]/10 hover:text-[#E1306C]"
+                onClick={() => void handlePlay()}
+                disabled={busy}
+                title={
+                  preview
+                    ? "Reproduzir a prévia oficial (30s)"
+                    : "Buscar a faixa real no iTunes e reproduzir a prévia"
+                }
+              >
+                {busy ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Play className="size-3.5" />
+                )}
+                {preview ? "Ouvir prévia" : busy ? "Buscando…" : "Ouvir prévia"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={copyName}
+                title="Copia o nome da música para colar no editor de Reels"
+              >
+                {copied ? (
+                  <Check className="size-3.5 text-green-600" />
+                ) : (
+                  <Copy className="size-3.5" />
+                )}
+                {copied ? "Nome copiado!" : "Copiar nome p/ Reels"}
+              </Button>
+            </div>
+          )}
+          {notice && <p className="mt-2 text-[11px] text-muted-foreground">{notice}</p>}
+        </div>
+
+        <div className="mt-3 space-y-1 text-xs text-muted-foreground">
           <ScoreBar score={a.score} ciclo={a.ciclo} />
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             {a.usos != null && a.usos > 0 ? (
@@ -250,6 +372,32 @@ function AudioCard({ a }: { a: InstaAudio }) {
             <span>🎯 compat {a.compat}%</span>
           </div>
         </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+          {a.itunes_url && (
+            <a
+              href={a.itunes_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-background px-3 text-muted-foreground hover:border-[#E1306C]/50 hover:text-[#E1306C]"
+            >
+              <ExternalLink className="size-3.5" /> Apple Music
+            </a>
+          )}
+          <a
+            href={ytSearch}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-background px-3 text-muted-foreground hover:border-[#E1306C]/50 hover:text-[#E1306C]"
+          >
+            <ExternalLink className="size-3.5" /> Achar no YouTube
+          </a>
+        </div>
+
+        <p className="mt-2 rounded-md bg-[#E1306C]/5 px-2 py-1.5 text-[11px] text-muted-foreground">
+          💡 No app do Instagram: Reels → 🎵 → pesquisar <strong>“{nomeReels}”</strong> e usar no
+          seu vídeo.
+        </p>
       </CardContent>
     </Card>
   );
@@ -263,6 +411,7 @@ function RadarInstagramPage() {
   const planSave = useInstaPlanSave();
   const planDelete = useInstaPlanDelete();
   const alertsMark = useInstaAlertsMark();
+  const audioPreview = useInstaRadarAudioPreview();
   const wipe = useInstaRadarWipe();
 
   const [kwInput, setKwInput] = useState("");
@@ -754,7 +903,7 @@ function RadarInstagramPage() {
         ) : (
           <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {audios.map((a) => (
-              <AudioCard key={a.id} a={a} />
+              <AudioCard key={a.id} a={a} onPreview={(id) => audioPreview.mutateAsync(id)} />
             ))}
           </div>
         )}

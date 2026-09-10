@@ -567,7 +567,82 @@ function toAudioRow(a: InstaAudio): Record<string, unknown> {
     fonte_detalhe: a.fonte_detalhe,
     url: a.url,
     coletado_em: a.coletado_em,
+    preview_url: a.preview_url ?? null,
+    artwork_url: a.artwork_url ?? null,
+    itunes_url: a.itunes_url ?? null,
+    track_name: a.track_name ?? null,
+    artist_name: a.artist_name ?? null,
+    enrich_attempted_at: a.enrich_attempted_at ?? null,
   };
+}
+
+// ============================================================
+// Prévia real da música (iTunes Search — preview oficial de 30s)
+// Não inventa nada: busca a faixa por nome/artista extraídos dos
+// sinais públicos e guarda o vínculo real p/ reproduzir no painel.
+// ============================================================
+
+type ItunesMatch = {
+  trackName: string | null;
+  artistName: string | null;
+  previewUrl: string | null;
+  artworkUrl: string | null;
+  itunesUrl: string | null;
+};
+
+function normStr(s: unknown): string {
+  return String(s ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function rankItunesPick(nome: string, results: any[]): any | null {
+  const q = normStr(nome);
+  const scored = results.map((r: any) => {
+    let score = 0;
+    const t = normStr(r.trackName);
+    const a = normStr(r.artistName);
+    if (t && q.includes(t)) score += 3;
+    if (a && q.includes(a)) score += 2;
+    if (r.previewUrl) score += 1;
+    return { r, score };
+  });
+  scored.sort((x, y) => y.score - x.score);
+  const best = scored[0];
+  if (best?.score) return best.r;
+  return results.find((r: any) => r.previewUrl) ?? results[0] ?? null;
+}
+
+async function resolveItunesAudio(
+  nome: string,
+  artista?: string | null,
+): Promise<ItunesMatch | null> {
+  const query = `${titutoLimpo(nome)}${artista ? ` ${titutoLimpo(artista)}` : ""}`.slice(0, 120);
+  if (!query.trim()) return null;
+  try {
+    const res = await fetch(
+      `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=music&entity=song&limit=5&country=br`,
+      { headers: { Accept: "application/json" } },
+    );
+    if (!res.ok) return null;
+    const json: any = await res.json();
+    const results: any[] = Array.isArray(json?.results) ? json.results : [];
+    const pick = rankItunesPick(nome, results);
+    if (!pick) return null;
+    return {
+      trackName: String(pick.trackName ?? "").trim() || null,
+      artistName: String(pick.artistName ?? "").trim() || null,
+      previewUrl: pick.previewUrl ? String(pick.previewUrl) : null,
+      artworkUrl: pick.artworkUrl100
+        ? String(pick.artworkUrl100).replace("100x100bb", "300x300bb")
+        : null,
+      itunesUrl: pick.trackViewUrl ? String(pick.trackViewUrl) : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 // ============================================================
@@ -751,6 +826,29 @@ async function runAnalysis(
     .sort((a, b) => b.score - a.score || b.compat - a.compat)
     .slice(0, TREND_CAP);
   const audios = [...audiosByNome.values()].sort((a, b) => b.score - a.score).slice(0, AUDIO_CAP);
+
+  // Vínculo com a faixa real (iTunes) nas novidades mais quentes — best-effort,
+  // limita subrequests e não trava a execução se der erro.
+  await Promise.all(
+    audios
+      .slice(0, 8)
+      .filter((a) => !prevAudioSet.has(a.nome.toLowerCase()) && !a.preview_url)
+      .map(async (a) => {
+        try {
+          const m = await resolveItunesAudio(a.nome, a.artista);
+          if (m) {
+            a.preview_url = m.previewUrl;
+            a.artwork_url = m.artworkUrl;
+            a.itunes_url = m.itunesUrl;
+            a.track_name = m.trackName;
+            a.artist_name = m.artistName;
+          }
+          a.enrich_attempted_at = new Date().toISOString();
+        } catch {
+          a.enrich_attempted_at = new Date().toISOString();
+        }
+      }),
+  );
 
   // Alertas
   const alerts: InstaAlert[] = [];
@@ -965,6 +1063,7 @@ export type InstaPlanInput = {
 export type InstaPlanDeleteInput = { token: string; id: string };
 export type InstaContentInput = { token: string; trend_id?: string | undefined };
 export type InstaAlertsMarkInput = { token: string };
+export type InstaAudioPreviewInput = { token: string; id: string };
 
 export const instaRadarDashboard = createServerFn({ method: "GET" })
   .validator((d: InstaTokenInput) => d)
@@ -1249,6 +1348,53 @@ export const instaRadarAlertsMark = createServerFn({ method: "POST" })
       return { success: false, error: "Falha ao marcar alertas." };
     }
   });
+
+export const instaRadarAudioPreview = createServerFn({ method: "POST" })
+  .validator((d: InstaAudioPreviewInput) => d)
+  .handler(
+    async ({
+      data,
+    }): Promise<{
+      success: boolean;
+      error?: string;
+      found: boolean;
+      audio?: InstaAudio | null;
+    }> => {
+      const userId = await verifyUser(data.token);
+      if (!userId)
+        return { success: false, error: "Sessão expirada. Entre novamente.", found: false };
+      try {
+        const admin: any = await getAdmin();
+        const { data: row } = await admin
+          .from("insta_radar_audios")
+          .select("*")
+          .eq("id", data.id)
+          .eq("user_id", userId)
+          .single();
+        if (!row) return { success: false, error: "Áudio não encontrado.", found: false };
+        const r: any = row;
+        if (r.preview_url) return { success: true, found: true, audio: r as InstaAudio };
+        const m = await resolveItunesAudio(String(r.nome), r.artista);
+        const upd: Record<string, unknown> = { enrich_attempted_at: new Date().toISOString() };
+        if (m) {
+          upd["preview_url"] = m.previewUrl;
+          upd["artwork_url"] = m.artworkUrl;
+          upd["itunes_url"] = m.itunesUrl;
+          upd["track_name"] = m.trackName;
+          upd["artist_name"] = m.artistName;
+        }
+        await admin.from("insta_radar_audios").update(upd).eq("id", data.id).eq("user_id", userId);
+        return {
+          success: true,
+          found: !!m?.previewUrl,
+          audio: { ...(r as InstaAudio), ...upd },
+        };
+      } catch (err) {
+        console.error("[insta-radar] audio preview:", err);
+        return { success: false, error: "Falha ao buscar a prévia da música.", found: false };
+      }
+    },
+  );
 
 export const instaRadarWipe = createServerFn({ method: "POST" })
   .validator((d: InstaTokenInput) => d)

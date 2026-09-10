@@ -112,6 +112,12 @@ export type InstaAudio = {
   fonte_detalhe: string | null;
   url: string | null;
   coletado_em: string;
+  preview_url?: string | null;
+  artwork_url?: string | null;
+  itunes_url?: string | null;
+  track_name?: string | null;
+  artist_name?: string | null;
+  enrich_attempted_at?: string | null;
 };
 
 export type InstaAlertTipo =

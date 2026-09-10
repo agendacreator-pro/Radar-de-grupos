@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
   instaRadarAlertsMark,
+  instaRadarAudioPreview,
   instaRadarContent,
   instaRadarDashboard,
   instaRadarPlanDelete,
@@ -10,7 +11,7 @@ import {
   instaRadarSaveKeywords,
   instaRadarWipe,
 } from "@/lib/instagram-radar-engine";
-import type { InstaContent, InstaDashboard } from "@/lib/instagram-radar";
+import type { InstaAudio, InstaContent, InstaDashboard } from "@/lib/instagram-radar";
 
 async function getToken(): Promise<string> {
   const {
@@ -111,6 +112,21 @@ export function useInstaAlertsMark() {
     mutationFn: async () => {
       const token = await getToken();
       return instaRadarAlertsMark({ data: { token } });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["instagram-radar"] });
+    },
+  });
+}
+
+export function useInstaRadarAudioPreview() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string): Promise<InstaAudio | null> => {
+      const token = await getToken();
+      const res = await instaRadarAudioPreview({ data: { token, id } });
+      if (!res.success) throw new Error(res.error ?? "Falha ao buscar a prévia da música");
+      return res.audio ?? null;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["instagram-radar"] });
