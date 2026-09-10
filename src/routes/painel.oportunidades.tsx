@@ -133,6 +133,9 @@ function RadarOportunidadesPage() {
         set.add(String(new Date(o.data_publicacao).getUTCFullYear()));
       }
     }
+    // Ano atual e anterior sempre disponíveis para filtrar a postagem.
+    set.add(String(new Date().getFullYear()));
+    set.add(String(new Date().getFullYear() - 1));
     return [...set].sort((a, b) => Number(b) - Number(a));
   }, [salvos, lastResults, view]);
 
