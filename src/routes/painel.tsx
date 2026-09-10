@@ -24,7 +24,7 @@ function PainelLayout() {
 
   if (loading || !session) {
     return (
-      <div className="app-shell grid min-h-screen place-items-center">
+      <div className="painel-shell grid min-h-screen place-items-center">
         <Loader2 className="size-6 animate-spin text-primary" />
       </div>
     );
@@ -36,9 +36,9 @@ function PainelLayout() {
   ] as const;
 
   return (
-    <div className="app-shell min-h-screen">
+    <div className="painel-shell min-h-screen">
       <nav className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center gap-1 px-5">
+        <div className="mx-auto flex max-w-none items-center gap-1 px-5">
           {tabs.map((tab) => {
             const active =
               location.pathname === tab.to || location.pathname.startsWith(`${tab.to}/`);

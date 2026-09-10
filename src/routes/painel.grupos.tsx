@@ -142,9 +142,9 @@ function grupoPostingInfo(group: Pick<RadarGroup, "description">): {
 }
 
 // Grade da tabela de grupos: colunas proporcionais ao espaço disponível,
-// textos quebram na palavra (nunca cortados) e nada rola para o lado.
+// min-widths garantem cabeçalhos/valores legíveis; nada rola para o lado.
 const TABLE_GRID =
-  "grid grid-cols-[minmax(0,1.6fr)_minmax(0,0.6fr)_minmax(0,0.7fr)_minmax(0,1.4fr)_minmax(0,0.7fr)_minmax(0,1.2fr)_auto] items-center gap-x-4";
+  "grid grid-cols-[minmax(8rem,1.6fr)_minmax(4rem,0.5fr)_minmax(5rem,0.6fr)_minmax(10rem,1.4fr)_minmax(4rem,0.5fr)_minmax(6rem,1.1fr)_auto] items-center gap-x-4";
 
 function PostingBadges({ group, compact = false }: { group: RadarGroup; compact?: boolean }) {
   const info = grupoPostingInfo(group);
@@ -939,13 +939,13 @@ function RadarGruposPage() {
                   "border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground",
                 )}
               >
-                <div className="min-w-0 px-1">Grupo</div>
-                <div className="min-w-0 px-1">Membros</div>
-                <div className="min-w-0 px-1">Visibilidade</div>
-                <div className="min-w-0 px-1">Postagem</div>
-                <div className="min-w-0 px-1">País</div>
-                <div className="min-w-0 px-1">Status</div>
-                <div className="min-w-0 px-1 text-right">Ações</div>
+                <div className="min-w-0 whitespace-nowrap px-1">Grupo</div>
+                <div className="min-w-0 whitespace-nowrap px-1">Membros</div>
+                <div className="min-w-0 whitespace-nowrap px-1">Visibilidade</div>
+                <div className="min-w-0 whitespace-nowrap px-1">Postagem</div>
+                <div className="min-w-0 whitespace-nowrap px-1">País</div>
+                <div className="min-w-0 whitespace-nowrap px-1">Status</div>
+                <div className="min-w-0 whitespace-nowrap px-1 text-right">Ações</div>
               </div>
               <div>
                 {filtered.map((g) => (
