@@ -200,11 +200,13 @@ function RadarGruposPage() {
   const [countryFilter, setCountryFilter] = useState<string>("todos");
   const [postingFilter, setPostingFilter] = useState<PostingFilter>("posso");
   const [newOnly, setNewOnly] = useState(true);
+  const [soFavoritos, setSoFavoritos] = useState(false);
 
   const [view, setView] = useState<"cards" | "tabela" | "resumo">("resumo");
   const [detail, setDetail] = useState<RadarGroup | null>(null);
 
   const stageTimer = useRef<number | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
   const baseGroups = lastResults && lastResults.length > 0 ? lastResults : gruposSalvos;
 
@@ -220,6 +222,7 @@ function RadarGruposPage() {
     if (visibilidade === "publico") list = list.filter((g) => g.is_public === true);
     if (statusFilter !== "todos") list = list.filter((g) => g.status === statusFilter);
     if (countryFilter !== "todos") list = list.filter((g) => g.country === countryFilter);
+    if (soFavoritos) list = list.filter((g) => g.favorito);
     if (postingFilter === "posso") {
       list = list.filter((g) => {
         const nivel = grupoPostingInfo(g).nivel;
@@ -250,7 +253,7 @@ function RadarGruposPage() {
       });
     }
     return arr;
-  }, [baseGroups, minMembers, visibilidade, statusFilter, countryFilter, sort, postingFilter]);
+  }, [baseGroups, minMembers, visibilidade, statusFilter, countryFilter, sort, postingFilter, soFavoritos]);
 
   async function runSearch(preset?: string) {
     const termo = (preset ?? term).trim();
@@ -440,6 +443,39 @@ function RadarGruposPage() {
     return { total, favoritos, maiores, publicaveis };
   }, [gruposSalvos]);
 
+  function selectStat(key: "total" | "posso" | "favoritos" | "maiores") {
+    if (key === "total") {
+      setPostingFilter("todos");
+      setVisibilidade("todos");
+      setMinMembers(null);
+      setSoFavoritos(false);
+      setStatusFilter("todos");
+      setCountryFilter("todos");
+    } else if (key === "posso") {
+      setPostingFilter("posso");
+      setVisibilidade("todos");
+      setMinMembers(null);
+      setSoFavoritos(false);
+      setStatusFilter("todos");
+      setCountryFilter("todos");
+    } else if (key === "favoritos") {
+      setSoFavoritos(true);
+      setPostingFilter("todos");
+      setVisibilidade("todos");
+      setMinMembers(null);
+      setStatusFilter("todos");
+      setCountryFilter("todos");
+    } else {
+      setMinMembers(100000);
+      setSoFavoritos(false);
+      setPostingFilter("todos");
+      setVisibilidade("todos");
+      setStatusFilter("todos");
+      setCountryFilter("todos");
+    }
+    setTimeout(() => listRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  }
+
   return (
     <div className="px-5 pb-10 pt-10">
       <header className="flex items-start justify-between gap-3">
@@ -497,21 +533,43 @@ function RadarGruposPage() {
       {/* Estatísticas rápidas */}
       <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
-          { label: "Grupos salvos", value: stats.total, icon: Users },
-          { label: "Posso postar", value: stats.publicaveis, icon: Megaphone },
-          { label: "Favoritos", value: stats.favoritos, icon: Star },
-          { label: "100k+ membros", value: stats.maiores, icon: Radar },
-        ].map((s) => (
-          <Card key={s.label} className="bg-card">
-            <CardContent className="flex items-center gap-3 p-4">
-              <s.icon className="size-5 shrink-0 text-primary" />
-              <div>
-                <div className="text-xl font-bold leading-none">{s.value}</div>
-                <div className="mt-1 text-xs text-muted-foreground">{s.label}</div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+          { key: "total" as const, label: "Grupos salvos", value: stats.total, icon: Users },
+          { key: "posso" as const, label: "Posso postar", value: stats.publicaveis, icon: Megaphone },
+          { key: "favoritos" as const, label: "Favoritos", value: stats.favoritos, icon: Star },
+          { key: "maiores" as const, label: "Mais de 100 mil membros", value: stats.maiores, icon: Radar },
+        ].map((s) => {
+          const active =
+            (s.key === "total" &&
+              postingFilter === "todos" &&
+              visibilidade === "todos" &&
+              minMembers == null &&
+              !soFavoritos &&
+              statusFilter === "todos" &&
+              countryFilter === "todos") ||
+            (s.key === "posso" && postingFilter === "posso" && !soFavoritos) ||
+            (s.key === "favoritos" && soFavoritos) ||
+            (s.key === "maiores" && minMembers === 100000 && !soFavoritos);
+          return (
+            <button
+              key={s.label}
+              type="button"
+              onClick={() => selectStat(s.key)}
+              title={`Mostrar: ${s.label}`}
+              className={cn(
+                "rounded-xl border bg-card text-left shadow-sm transition-colors hover:border-primary hover:bg-accent",
+                active ? "border-primary ring-1 ring-primary" : "border-border",
+              )}
+            >
+              <span className="flex items-center gap-3 p-4">
+                <s.icon className="size-5 shrink-0 text-primary" />
+                <span>
+                  <span className="block text-xl font-bold leading-none">{s.value}</span>
+                  <span className="mt-1 block text-xs text-muted-foreground">{s.label}</span>
+                </span>
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Busca */}
@@ -791,7 +849,7 @@ function RadarGruposPage() {
       </Card>
 
       {/* Lista */}
-      <div className="mt-4">
+      <div ref={listRef} className="mt-4 scroll-mt-4">
         {loadingSalvos && !lastResults ? (
           <div className="space-y-3">
             {Array.from({ length: 5 }).map((_, i) => (
