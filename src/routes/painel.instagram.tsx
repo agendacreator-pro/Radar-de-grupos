@@ -267,6 +267,8 @@ function RadarInstagramPage() {
 
   const [kwInput, setKwInput] = useState("");
   const [cycleFilter, setCycleFilter] = useState<"todos" | InstaCiclo>("todos");
+  type StatFilter = null | "auge" | "compat70" | "oport";
+  const [statFilter, setStatFilter] = useState<StatFilter>(null);
   const [contentDialog, setContentDialog] = useState(false);
   const [content, setContent] = useState<InstaContent | null>(null);
   const [planDialog, setPlanDialog] = useState(false);
@@ -281,6 +283,8 @@ function RadarInstagramPage() {
   });
   const [confirmWipe, setConfirmWipe] = useState(false);
   const alertsRef = useRef<HTMLDivElement>(null);
+  const trendsRef = useRef<HTMLDivElement>(null);
+  const audiosRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (contentDialog === false) setContent(null);
@@ -295,9 +299,27 @@ function RadarInstagramPage() {
   const stats = data?.stats;
 
   const viewedTrends = useMemo(() => {
-    if (cycleFilter === "todos") return trends;
-    return trends.filter((t) => t.ciclo === cycleFilter);
-  }, [trends, cycleFilter]);
+    let out = trends;
+    if (cycleFilter !== "todos") out = out.filter((t) => t.ciclo === cycleFilter);
+    if (statFilter === "auge")
+      out = out.filter((t) => t.ciclo === "auge" || t.ciclo === "crescendo");
+    if (statFilter === "compat70") out = out.filter((t) => t.compat >= 70);
+    if (statFilter === "oport")
+      out = out.filter((t) => t.score >= 65 && t.compat >= 40 && t.ciclo !== "caindo");
+    return out;
+  }, [trends, cycleFilter, statFilter]);
+
+  function applyStatFilter(f: StatFilter, scrollTo: "trends" | "audios" | "alerts") {
+    setStatFilter(f === statFilter ? null : f);
+    setCycleFilter("todos");
+    const ref = scrollTo === "alerts" ? alertsRef : scrollTo === "audios" ? audiosRef : trendsRef;
+    ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function clearTrendsFilters() {
+    setStatFilter(null);
+    setCycleFilter("todos");
+  }
 
   const emergentes = useMemo(
     () =>
@@ -519,28 +541,76 @@ function RadarInstagramPage() {
       {/* Estatísticas rápidas */}
       <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         {[
-          { label: "Tendências salvas", value: stats?.total_trends ?? 0, icon: Radar },
-          { label: "No auge/crescendo", value: stats?.na_auge ?? 0, icon: Flame },
-          { label: "Compat 70%+", value: stats?.nicho_alta ?? 0, icon: Tags },
-          { label: "Áudios em alta", value: stats?.audio_em_alta ?? 0, icon: ListMusic },
+          {
+            label: "Tendências salvas",
+            value: stats?.total_trends ?? 0,
+            icon: Radar,
+            active: statFilter === null && cycleFilter === "todos",
+            onClick: () => {
+              clearTrendsFilters();
+              trendsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+            },
+          },
+          {
+            label: "No auge/crescendo",
+            value: stats?.na_auge ?? 0,
+            icon: Flame,
+            active: statFilter === "auge",
+            onClick: () => applyStatFilter("auge", "trends"),
+          },
+          {
+            label: "Compat 70%+",
+            value: stats?.nicho_alta ?? 0,
+            icon: Tags,
+            active: statFilter === "compat70",
+            onClick: () => applyStatFilter("compat70", "trends"),
+          },
+          {
+            label: "Áudios em alta",
+            value: stats?.audio_em_alta ?? 0,
+            icon: ListMusic,
+            active: false,
+            onClick: () =>
+              audiosRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+          },
           {
             label: "Alertas não lidos",
             value: stats?.alertas_nao_lidos ?? 0,
             icon: MessageSquare,
-            onClick: () => alertsRef.current?.scrollIntoView({ behavior: "smooth" }),
+            active: false,
+            onClick: () =>
+              alertsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
           },
-          { label: "Oportunidades hoje", value: stats?.oport_hoje ?? 0, icon: TrendingUp },
+          {
+            label: "Oportunidades hoje",
+            value: stats?.oport_hoje ?? 0,
+            icon: TrendingUp,
+            active: statFilter === "oport",
+            onClick: () => applyStatFilter("oport", "trends"),
+          },
         ].map((s) => (
           <button
             key={s.label}
             type="button"
-            disabled={!s.onClick}
             onClick={s.onClick}
-            className="rounded-xl border border-border bg-card p-4 text-left shadow-sm transition-colors hover:border-[#E1306C] disabled:hover:border-border"
+            title="Clique para ver o conteúdo"
+            className={cn(
+              "rounded-xl border p-4 text-left shadow-sm transition-all",
+              s.active
+                ? "border-transparent bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white"
+                : "border-border bg-card hover:border-[#E1306C]",
+            )}
           >
-            <s.icon className="size-5 text-[#E1306C]" />
+            <s.icon className={cn("size-5", s.active ? "text-white" : "text-[#E1306C]")} />
             <span className="mt-2 block text-2xl font-bold leading-none">{s.value}</span>
-            <span className="mt-1 block text-xs text-muted-foreground">{s.label}</span>
+            <span
+              className={cn(
+                "mt-1 block text-xs",
+                s.active ? "text-white/90" : "text-muted-foreground",
+              )}
+            >
+              {s.label}
+            </span>
           </button>
         ))}
       </div>
@@ -593,13 +663,34 @@ function RadarInstagramPage() {
       />
 
       {/* Tendências */}
-      <section className="mt-8">
+      <section ref={trendsRef} className="mt-8 scroll-mt-24">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
             <Radar className="size-5 text-[#E1306C]" />
             Tendências do momento
+            {viewedTrends.length !== trends.length && (
+              <span className="text-sm font-normal text-muted-foreground">
+                ({viewedTrends.length} de {trends.length})
+              </span>
+            )}
           </h2>
           <div className="flex flex-wrap items-center gap-1.5">
+            {statFilter && (
+              <button
+                type="button"
+                onClick={() => clearTrendsFilters()}
+                title="Limpar filtro do card de estatística"
+                className="inline-flex items-center gap-1 rounded-full border border-[#DD2A7B]/40 bg-[#E1306C]/10 px-2.5 py-0.5 text-xs font-medium text-[#C13584] transition-colors hover:bg-[#E1306C]/20"
+              >
+                <TrendingUp className="size-3" />
+                {statFilter === "auge"
+                  ? "No auge/crescendo"
+                  : statFilter === "compat70"
+                    ? "Compat 70%+"
+                    : "Oportunidades hoje"}
+                <span className="text-[#C13584]">×</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setCycleFilter("todos")}
@@ -650,7 +741,7 @@ function RadarInstagramPage() {
       </section>
 
       {/* Áudios em alta */}
-      <section className="mt-8">
+      <section ref={audiosRef} className="mt-8 scroll-mt-24">
         <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
           <ListMusic className="size-5 text-[#E1306C]" />
           Áudios em alta
