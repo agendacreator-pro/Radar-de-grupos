@@ -666,7 +666,7 @@ export async function verifyUser(token: string): Promise<string | null> {
 // Server Functions
 // ============================================================
 
-export type RadarSearchInput = { q: string; terms: string[]; token: string };
+export type RadarSearchInput = { q: string; terms: string[]; token: string; newOnly?: boolean };
 
 export const radarSearch = createServerFn({ method: "POST" })
   .validator((d: RadarSearchInput) => d)
@@ -778,11 +778,49 @@ export const radarSearch = createServerFn({ method: "POST" })
         { terms: rawTerms.slice(0, 5) },
       );
     }
+
+    // Modo "só novos": exclui grupos que o usuário já tem salvos (pela URL) e
+    // não os re-salva/atualiza — descoberta sempre traz grupos inéditos do
+    // nicho, sem repetir a carteira atual.
+    let toPersist = relevant;
+    let repetidosIgnorados = 0;
+    if (data.newOnly && relevant.length > 0) {
+      try {
+        const admin = await getAdmin();
+        const urls = [...new Set(relevant.map((g) => g.url))];
+        const { data: ex } = await admin
+          .from("radar_grupos")
+          .select("id,url")
+          .in("url", urls);
+        const idToUrl = new Map<string, string>();
+        for (const r of ex ?? []) idToUrl.set((r as any).id, (r as any).url);
+        const ids = [...idToUrl.keys()];
+        const knownIds = new Set<string>();
+        if (ids.length > 0) {
+          const { data: mine } = await admin
+            .from("radar_grupo_usuario")
+            .select("grupo_id")
+            .eq("user_id", userId)
+            .in("grupo_id", ids);
+          for (const r of mine ?? []) knownIds.add((r as any).grupo_id as string);
+        }
+        const knownUrls = new Set<string>();
+        for (const id of knownIds) {
+          const u = idToUrl.get(id);
+          if (u) knownUrls.add(u);
+        }
+        toPersist = relevant.filter((g) => !knownUrls.has(g.url));
+        repetidosIgnorados = relevant.length - toPersist.length;
+      } catch (err) {
+        console.error("[radar] newOnly exclude:", err);
+      }
+    }
+
     let groupIds: string[] = [];
     let inserted = 0;
     let groups: RadarGroup[] = [];
     try {
-      const persisted = await persistGroups(userId, relevant, terms);
+      const persisted = await persistGroups(userId, toPersist, terms);
       groupIds = persisted.groupIds;
       inserted = persisted.inserted;
       if (persisted.rows && persisted.rows.length > 0) {
@@ -793,12 +831,12 @@ export const radarSearch = createServerFn({ method: "POST" })
       console.error("[radar] radarSearch persist:", err);
       return { success: false, error: "Não foi possível salvar os grupos encontrados. Tente novamente." };
     }
-    // Se havia grupos relevantes descobertos e nenhum foi salvo, algo falhou
-    // no banco — não mascarar como "0 grupos".
-    if (relevant.length > 0 && groupIds.length === 0) {
+    // Se havia grupos novos relevantes descobertos e nenhum foi salvo, algo
+    // falhou no banco — não mascarar como "0 grupos".
+    if (toPersist.length > 0 && groupIds.length === 0) {
       console.error(
         "[radar] radarSearch: groups discovered but none persisted",
-        { discovered: relevant.length, source_failures: sourceFailures.slice(0, 8) },
+        { discovered: toPersist.length, source_failures: sourceFailures.slice(0, 8) },
       );
       return { success: false, error: "Os grupos foram encontrados, mas não foi possível salvá-los agora. Tente novamente." };
     }
@@ -850,6 +888,7 @@ export const radarSearch = createServerFn({ method: "POST" })
       confirmed_count: confirmed,
       unconfirmed_count: groups.length - confirmed,
       filtered_dropped: allCount - relevant.length,
+      repetidos_ignorados: repetidosIgnorados,
       groups,
       terms_used: terms,
       sources_ok: sourcesOk,
@@ -857,6 +896,45 @@ export const radarSearch = createServerFn({ method: "POST" })
       budget_hit: budgetHit,
       elapsed_ms: Date.now() - t0,
     };
+  });
+
+export type RadarWipeInput = { token: string };
+
+// Zera a carteira de grupos do usuário (vínculos, listas e grupos órfãos) para
+// reiniciar a descoberta com grupos novos do nicho.
+export const radarWipe = createServerFn({ method: "POST" })
+  .validator((d: RadarWipeInput) => d)
+  .handler(async ({ data }) => {
+    const userId = await verifyUser(data.token);
+    if (!userId) return { success: false, error: "Sessão expirada. Entre novamente." };
+    const admin = await getAdmin();
+    let ids: string[] = [];
+    let orphans = 0;
+    try {
+      const { data: mine } = await admin
+        .from("radar_grupo_usuario")
+        .select("grupo_id")
+        .eq("user_id", userId);
+      ids = (mine ?? []).map((r: any) => r.grupo_id as string);
+      await admin.from("radar_grupo_usuario").delete().eq("user_id", userId);
+      await admin.from("radar_lista_grupos").delete().eq("user_id", userId);
+      if (ids.length > 0) {
+        const { data: stillUsed } = await admin
+          .from("radar_grupo_usuario")
+          .select("grupo_id")
+          .in("grupo_id", ids);
+        const used = new Set<string>((stillUsed ?? []).map((r: any) => r.grupo_id as string));
+        const orphanIds = ids.filter((id) => !used.has(id));
+        orphans = orphanIds.length;
+        if (orphanIds.length > 0) {
+          await admin.from("radar_grupos").delete().in("id", orphanIds);
+        }
+      }
+      return { success: true, deleted: ids.length, deleted_orphans: orphans };
+    } catch (err) {
+      console.error("[radar] radarWipe:", err);
+      return { success: false, error: "Não foi possível limpar os grupos agora. Tente novamente em instantes." };
+    }
   });
 
 export type RadarImportInput = { urls: string[]; token: string };

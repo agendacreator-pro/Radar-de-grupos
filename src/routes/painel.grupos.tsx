@@ -21,6 +21,7 @@ import {
   Search,
   Star,
   Tags,
+  Trash2,
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -53,7 +54,7 @@ import {
   type RadarStatus,
 } from "@/lib/radar";
 import { supabase } from "@/integrations/supabase/client";
-import { radarImport, radarRecheck, radarSearch } from "@/lib/radar-engine";
+import { radarImport, radarRecheck, radarSearch, radarWipe } from "@/lib/radar-engine";
 import {
   useRadarGroups,
   useRadarLists,
@@ -186,9 +187,11 @@ function RadarGruposPage() {
     total_cache_new: number;
     confirmed_count: number;
     unconfirmed_count: number;
+    repetidos_ignorados?: number;
   } | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [confirmWipe, setConfirmWipe] = useState(false);
 
   const [minMembers, setMinMembers] = useState<number | null>(null);
   const [visibilidade, setVisibilidade] = useState<Visibilidade>("todos");
@@ -196,6 +199,7 @@ function RadarGruposPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("todos");
   const [countryFilter, setCountryFilter] = useState<string>("todos");
   const [postingFilter, setPostingFilter] = useState<PostingFilter>("posso");
+  const [newOnly, setNewOnly] = useState(true);
 
   const [view, setView] = useState<"cards" | "tabela" | "resumo">("resumo");
   const [detail, setDetail] = useState<RadarGroup | null>(null);
@@ -268,7 +272,7 @@ function RadarGruposPage() {
       data: { session },
     } = await supabase.auth.getSession();
     const token = session?.access_token ?? "";
-    const res = await radarSearch({ data: { q: termo, terms: selectedTerms, token } }).catch(
+    const res = await radarSearch({ data: { q: termo, terms: selectedTerms, token, newOnly } }).catch(
       (err: unknown) => {
         clearStage();
         setSearching(false);
@@ -311,6 +315,39 @@ function RadarGruposPage() {
     },
     [],
   );
+
+  useEffect(() => {
+    if (!confirmWipe) return;
+    const t = window.setTimeout(() => setConfirmWipe(false), 6000);
+    return () => window.clearTimeout(t);
+  }, [confirmWipe]);
+
+  async function handleWipe() {
+    setSearching(true);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token ?? "";
+      const res = await radarWipe({ data: { token } });
+      if (!res.success || res.error) {
+        toast.error(res.error ?? "Não foi possível limpar agora. Tente novamente em instantes.");
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: ["radar-grupos"] });
+      setLastResults(null);
+      setLastMeta(null);
+      toast.success(
+        `${res.deleted ?? 0} grupo(s) zerado(s). Próxima busca vai trazer grupos novos do nicho.`,
+      );
+    } catch (err) {
+      console.error("[radar] wipe:", err);
+      toast.error("Falha ao limpar. Tente novamente em instantes.");
+    } finally {
+      setSearching(false);
+      setConfirmWipe(false);
+    }
+  }
 
   function toggleTerm(t: string) {
     setSelectedTerms((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
@@ -416,6 +453,28 @@ function RadarGruposPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          {confirmWipe ? (
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => void handleWipe()}
+              disabled={searching}
+              title="Confirma: apaga TODOS os grupos salvos para reiniciar a descoberta"
+            >
+              {searching ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+              Confirmar limpar
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setConfirmWipe(true)}
+              disabled={searching}
+              title="Limpar/zerar os grupos encontrados para listar grupos novos do nicho"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          )}
           <Button
             size="sm"
             variant="outline"
@@ -506,6 +565,28 @@ function RadarGruposPage() {
             )}
           </div>
 
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">Modo:</span>
+            <button
+              type="button"
+              onClick={() => setNewOnly((v) => !v)}
+              title="Oculta e não re-salva grupos que você já tem na carteira — foca em descobertas sempre novas do nicho"
+              className={cn(
+                "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
+                newOnly
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-background text-muted-foreground hover:border-primary/50",
+              )}
+            >
+              Só novos grupos
+            </button>
+            {newOnly && (
+              <span className="text-[11px] text-muted-foreground">
+                Grupos já salvos são ocultados; a busca prioriza grupos inéditos do nicho.
+              </span>
+            )}
+          </div>
+
           {searching && (
             <div className="flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-foreground">
               <Loader2 className="size-4 animate-spin text-primary" />
@@ -521,6 +602,11 @@ function RadarGruposPage() {
               <Badge variant="secondary">{lastMeta.total_unique} grupos encontrados</Badge>
               <Badge variant="secondary">{lastMeta.total_cache_new} novos</Badge>
               <Badge variant="secondary">{lastMeta.confirmed_count} com membros confirmados</Badge>
+              {lastMeta.repetidos_ignorados && lastMeta.repetidos_ignorados > 0 && (
+                <Badge variant="outline">
+                  {lastMeta.repetidos_ignorados} repetidos ocultados (já salvos)
+                </Badge>
+              )}
             </div>
           )}
         </CardContent>
