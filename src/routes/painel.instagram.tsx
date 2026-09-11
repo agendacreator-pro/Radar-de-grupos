@@ -388,11 +388,13 @@ function AudioCard({
         setNotice(null);
       } else {
         setNotice(
-          "Prévia não encontrada para esse nome — use os links abaixo para localizar o áudio e pesquisar no editor de Reels.",
+          "Prévia não encontrada para esse nome — busca manual aberta abaixo: ajuste o nome/artista e toque em Buscar faixa real.",
         );
+        setEditOpen(true);
       }
     } catch {
       setNotice("Não consegui buscar a prévia agora. Tente de novo em instantes.");
+      setEditOpen(true);
     } finally {
       setBusy(false);
     }

@@ -599,23 +599,34 @@ function normStr(s: unknown): string {
     .trim();
 }
 
-function rankItunesPick(nome: string, results: any[]): any | null {
-  const q = normStr(nome);
-  const scored = (results ?? []).map((r: any) => {
-    let score = 0;
-    const t = normStr(r.trackName);
-    const a = normStr(r.artistName);
-    if (t && q.includes(t)) score += 4;
-    else if (t && t.includes(q)) score += 2;
-    if (a && q.includes(a)) score += 2;
-    if (r.previewUrl) score += 1.5;
-    if (t === q && a && q.includes(a)) score += 4;
-    return { r, score };
-  });
-  scored.sort((x, y) => y.score - x.score || (x.r.previewUrl ? 1 : 0) - (y.r.previewUrl ? 1 : 0));
-  const best = scored[0];
-  if (best?.score) return best.r;
-  return results.find((r: any) => r.previewUrl) ?? results[0] ?? null;
+function extractQuotedTitle(raw: string): string | null {
+  const m = String(raw ?? "").match(/["“”'`«]([^"“”'`»]{2,60})["”'`»]/);
+  return m ? cleanAudioPart(m[1] ?? "") : null;
+}
+
+function searchTermVariants(nome: string, artista?: string | null): string[] {
+  const raw = String(nome ?? "");
+  const quoted = extractQuotedTitle(raw);
+  const base = titutoLimpo(raw)
+    .replace(/^(?:[\s:;,.\-–—"“”'‘`«»]+|🎵|🎶)+/, "")
+    .replace(/(?:["“”'`«»]|🎵|🎶)+/g, " ");
+  const firstClause =
+    base.split(/(?:\s+(?:de|do|da|cantado por)\s+[A-ZÀ-Ú]|,|;|\||\(|-)/i)[0]?.trim() ?? "";
+  const cleanArt = artista ? cleanAudioPart(artista) : null;
+  const out: string[] = [];
+  const push = (s: string | null) => {
+    const c = (s ?? "").trim().replace(/\s+/g, " ");
+    if (c.length >= 2 && c.length <= 100 && c.toLowerCase() !== "em alta") out.push(c);
+  };
+  if (quoted) {
+    push(`${quoted}${cleanArt ? ` ${cleanArt}` : ""}`);
+    push(quoted);
+  }
+  push(`${base}${cleanArt ? ` ${cleanArt}` : ""}`);
+  push(base);
+  push(firstClause);
+  if (cleanArt && cleanArt.length >= 3) push(cleanArt);
+  return Array.from(new Set(out));
 }
 
 const ITUNES_TIMEOUT_MS = 7000;
@@ -654,30 +665,44 @@ async function resolveItunesAudio(
   nome: string,
   artista?: string | null,
 ): Promise<ItunesMatch | null> {
-  const base = titutoLimpo(nome).slice(0, 90);
-  if (!base.trim()) return null;
-  const queries = Array.from(
-    new Set(
-      [
-        artista && titutoLimpo(artista) ? `${base} ${titutoLimpo(artista)}`.slice(0, 120) : null,
-        base,
-        base.replace(/\s*\([^)]*\)\s*$/g, ""),
-      ].filter(Boolean) as string[],
-    ),
-  );
-  const seen = new Set<number>();
+  const variants = searchTermVariants(nome, artista);
+  if (variants.length === 0) return null;
   const all: any[] = [];
-  for (const q of queries) {
-    for (const r of await itunesSearch(q)) {
+  const seen = new Set<number>();
+  let i = 0;
+  for (const v of variants) {
+    const weight = 6 - i;
+    for (const r of await itunesSearch(v)) {
       if (r.trackId != null && seen.has(r.trackId)) continue;
       if (r.trackId != null) seen.add(r.trackId);
+      r.__instaWeight = weight;
       all.push(r);
     }
+    i++;
   }
   if (all.length === 0) return null;
-  const pick = rankItunesPick(base, all) ?? all.find((r) => r.previewUrl) ?? null;
-  if (!pick) return null;
-  return toItunesMatch(pick);
+  const qRef =
+    extractQuotedTitle(nome) ??
+    (searchTermVariants(nome, null)[0] || titutoLimpo(nome)).slice(0, 60);
+  const q = normStr(qRef.replace(/\([^)]*\)/g, ""));
+  const scored = all.map((r: any) => {
+    let s = (r.__instaWeight ?? 0) * 10;
+    const t = normStr(r.trackName);
+    const a = normStr(r.artistName);
+    if (t && q.includes(t)) s += 4;
+    else if (t && t.includes(q)) s += 2;
+    if (a && q.includes(a)) s += 2;
+    if (r.previewUrl) s += 1.5;
+    return { r, s };
+  });
+  scored.sort((x, y) => y.s - x.s || (x.r.previewUrl ? 1 : 0) - (y.r.previewUrl ? 1 : 0));
+  let best = scored[0]?.r;
+  if (best && !best.previewUrl) {
+    const p = all.find((r) => r.previewUrl);
+    if (p) best = p;
+  }
+  if (!best) return null;
+  return toItunesMatch(best);
 }
 
 // ============================================================
