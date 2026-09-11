@@ -10,5 +10,4 @@ alter table public.insta_radar_audios
   add column if not exists itunes_url text,
   add column if not exists track_name text,
   add column if not exists artist_name text,
-  add column if not exists enrich_attempted_at timestamptz,
-  add column if not exists provider text;
+  add column if not exists enrich_attempted_at timestamptz;
