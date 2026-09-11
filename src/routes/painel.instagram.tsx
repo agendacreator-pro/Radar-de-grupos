@@ -680,6 +680,12 @@ function RadarInstagramPage() {
     if (contentDialog === false) setContent(null);
   }, [contentDialog]);
 
+  useEffect(() => {
+    if (!confirmWipe) return;
+    const t = window.setTimeout(() => setConfirmWipe(false), 6000);
+    return () => window.clearTimeout(t);
+  }, [confirmWipe]);
+
   const trends = useMemo(() => data?.trends ?? [], [data]);
   const audios = useMemo(() => data?.audios ?? [], [data]);
   const alerts = useMemo(() => data?.alerts ?? [], [data]);
@@ -936,6 +942,32 @@ function RadarInstagramPage() {
             )}
             O que postar hoje?
           </Button>
+          {confirmWipe ? (
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => void handleWipe()}
+              disabled={wipe.isPending || run.isPending}
+              title="Confirma: apaga TODOS os dados do radar do Instagram para reiniciar a varredura"
+            >
+              {wipe.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Trash2 className="size-4" />
+              )}
+              Confirmar limpar
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setConfirmWipe(true)}
+              disabled={wipe.isPending}
+              title="Limpar/zerar as pesquisas do radar do Instagram (tendências, áudios, alertas, histórico, plano e conexão da sua conta)"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          )}
         </div>
       </header>
 
@@ -1492,33 +1524,8 @@ function RadarInstagramPage() {
         <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
           <p className="text-[11px] text-muted-foreground">
             Seus dados ficam isolados por usuário (RLS). O radar respeita intervalo de {`10 min`}{" "}
-            entre execuções.
+            entre execuções. A lixeira no topo zera as pesquisas do radar.
           </p>
-          {confirmWipe ? (
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={() => void handleWipe()}
-              disabled={wipe.isPending}
-            >
-              {wipe.isPending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Trash2 className="size-4" />
-              )}
-              Confirmar limpar
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setConfirmWipe(true)}
-              title="Apaga TODOS os dados do radar do Instagram (sua conta)"
-              disabled={wipe.isPending}
-            >
-              <Trash2 className="size-4" />
-            </Button>
-          )}
         </div>
       </section>
     </div>
