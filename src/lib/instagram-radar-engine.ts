@@ -601,49 +601,83 @@ function normStr(s: unknown): string {
 
 function rankItunesPick(nome: string, results: any[]): any | null {
   const q = normStr(nome);
-  const scored = results.map((r: any) => {
+  const scored = (results ?? []).map((r: any) => {
     let score = 0;
     const t = normStr(r.trackName);
     const a = normStr(r.artistName);
-    if (t && q.includes(t)) score += 3;
+    if (t && q.includes(t)) score += 4;
+    else if (t && t.includes(q)) score += 2;
     if (a && q.includes(a)) score += 2;
-    if (r.previewUrl) score += 1;
+    if (r.previewUrl) score += 1.5;
+    if (t === q && a && q.includes(a)) score += 4;
     return { r, score };
   });
-  scored.sort((x, y) => y.score - x.score);
+  scored.sort((x, y) => y.score - x.score || (x.r.previewUrl ? 1 : 0) - (y.r.previewUrl ? 1 : 0));
   const best = scored[0];
   if (best?.score) return best.r;
   return results.find((r: any) => r.previewUrl) ?? results[0] ?? null;
+}
+
+const ITUNES_TIMEOUT_MS = 7000;
+
+async function itunesSearch(query: string): Promise<any[]> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ITUNES_TIMEOUT_MS);
+  try {
+    const res = await fetch(
+      `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=music&entity=song&limit=8&country=br`,
+      { headers: { Accept: "application/json" }, signal: ctrl.signal },
+    );
+    if (!res.ok) return [];
+    const json: any = await res.json();
+    return Array.isArray(json?.results) ? json.results : [];
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function toItunesMatch(pick: any): ItunesMatch {
+  return {
+    trackName: String(pick?.trackName ?? "").trim() || null,
+    artistName: String(pick?.artistName ?? "").trim() || null,
+    previewUrl: pick?.previewUrl ? String(pick.previewUrl) : null,
+    artworkUrl: pick?.artworkUrl100
+      ? String(pick.artworkUrl100).replace("100x100bb", "300x300bb")
+      : null,
+    itunesUrl: pick?.trackViewUrl ? String(pick.trackViewUrl) : null,
+  };
 }
 
 async function resolveItunesAudio(
   nome: string,
   artista?: string | null,
 ): Promise<ItunesMatch | null> {
-  const query = `${titutoLimpo(nome)}${artista ? ` ${titutoLimpo(artista)}` : ""}`.slice(0, 120);
-  if (!query.trim()) return null;
-  try {
-    const res = await fetch(
-      `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=music&entity=song&limit=5&country=br`,
-      { headers: { Accept: "application/json" } },
-    );
-    if (!res.ok) return null;
-    const json: any = await res.json();
-    const results: any[] = Array.isArray(json?.results) ? json.results : [];
-    const pick = rankItunesPick(nome, results);
-    if (!pick) return null;
-    return {
-      trackName: String(pick.trackName ?? "").trim() || null,
-      artistName: String(pick.artistName ?? "").trim() || null,
-      previewUrl: pick.previewUrl ? String(pick.previewUrl) : null,
-      artworkUrl: pick.artworkUrl100
-        ? String(pick.artworkUrl100).replace("100x100bb", "300x300bb")
-        : null,
-      itunesUrl: pick.trackViewUrl ? String(pick.trackViewUrl) : null,
-    };
-  } catch {
-    return null;
+  const base = titutoLimpo(nome).slice(0, 90);
+  if (!base.trim()) return null;
+  const queries = Array.from(
+    new Set(
+      [
+        artista && titutoLimpo(artista) ? `${base} ${titutoLimpo(artista)}`.slice(0, 120) : null,
+        base,
+        base.replace(/\s*\([^)]*\)\s*$/g, ""),
+      ].filter(Boolean) as string[],
+    ),
+  );
+  const seen = new Set<number>();
+  const all: any[] = [];
+  for (const q of queries) {
+    for (const r of await itunesSearch(q)) {
+      if (r.trackId != null && seen.has(r.trackId)) continue;
+      if (r.trackId != null) seen.add(r.trackId);
+      all.push(r);
+    }
   }
+  if (all.length === 0) return null;
+  const pick = rankItunesPick(base, all) ?? all.find((r) => r.previewUrl) ?? null;
+  if (!pick) return null;
+  return toItunesMatch(pick);
 }
 
 // ============================================================
@@ -751,8 +785,9 @@ async function runAnalysis(
       });
     } else {
       // Áudio
-      const nome = extractAudioName(obs.title, obs.snippet);
-      if (!nome) continue;
+      const meta = extractAudioMeta(obs.title, obs.snippet);
+      if (!meta) continue;
+      const nome = meta.nome;
       const compat = computeCompat(obs.title, obs.snippet, keywords);
       const s = analyzeSignals(obs, compat);
       const ciclo = deriveCiclo(s, compat, texto);
@@ -785,7 +820,7 @@ async function runAnalysis(
       audiosByNome.set(key, {
         id: "",
         nome,
-        artista: extractAudioArtist(obs.title, obs.snippet),
+        artista: meta.artista,
         usos,
         crescimento,
         ciclo,
@@ -833,7 +868,7 @@ async function runAnalysis(
   await Promise.all(
     audios
       .slice(0, 8)
-      .filter((a) => !prevAudioSet.has(a.nome.toLowerCase()) && !a.preview_url)
+      .filter((a) => !a.preview_url)
       .map(async (a) => {
         try {
           const m = await resolveItunesAudio(a.nome, a.artista);
@@ -924,26 +959,221 @@ function alertRow(tipo: InstaAlert["tipo"], titulo: string, descricao: string | 
   return { id: "", tipo, titulo, descricao, lido: false, criado_em: new Date().toISOString() };
 }
 
-function extractAudioName(titulo: string, snippet: string): string | null {
-  const candidates = [titulo, snippet];
-  const re =
-    /\b(?:áudio|trend de áudio|som(?: \d+)?)\s*[:\-–]?\s*["“”']?([A-Za-zÀ-ú0-9][^.;:!?"]{2,60}?)\b/i;
-  for (const c of candidates) {
-    const m = re.exec(c.trim());
-    if (m && m[1]) return titutoLimpo(m[1]).slice(0, 60);
-  }
-  if (snippet.includes("áudio"))
-    return titutoLimpo(snippet.split("áudio")[1]?.split(/[,.;]/)[0] ?? "").slice(0, 60) || null;
-  return null;
+const AUDIO_GENERIC_WORDS = new Set([
+  "em",
+  "no",
+  "na",
+  "nas",
+  "nos",
+  "nao",
+  "da",
+  "do",
+  "de",
+  "dos",
+  "das",
+  "que",
+  "os",
+  "as",
+  "um",
+  "uma",
+  "uns",
+  "esta",
+  "este",
+  "estao",
+  "dessa",
+  "desse",
+  "essa",
+  "esse",
+  "isso",
+  "isto",
+  "para",
+  "com",
+  "por",
+  "sem",
+  "quem",
+  "alta",
+  "bombando",
+  "viral",
+  "viralizou",
+  "viralizar",
+  "viralizando",
+  "novo",
+  "nova",
+  "novos",
+  "novas",
+  "instagram",
+  "reels",
+  "reel",
+  "tiktok",
+  "semana",
+  "agora",
+  "hoje",
+  "trend",
+  "trends",
+  "tendencia",
+  "tendencias",
+  "usos",
+  "usadas",
+  "usados",
+  "usado",
+  "mais",
+  "menos",
+  "veja",
+  "confira",
+  "descubra",
+  "descubram",
+  "ranking",
+  "lista",
+  "top",
+  "hits",
+  "hit",
+  "muito",
+  "muita",
+  "efeito",
+  "efeitos",
+  "sonoro",
+  "sonora",
+  "audio",
+  "audios",
+  "musica",
+  "musicas",
+  "som",
+  "sons",
+  "esta",
+  "ja",
+  "vai",
+  "pode",
+  "completo",
+  "aqui",
+  "tem",
+  "seu",
+  "sua",
+  "seus",
+  "suas",
+  "como",
+  "cada",
+  "nesta",
+  "desta",
+  "lugares",
+  "generou",
+  "geraram",
+  "dominam",
+  "mais",
+  "usadas",
+  "segue",
+  "virou",
+  "tomou",
+  "conta",
+  "vem",
+]);
+
+function isAudioGeneric(s: string): boolean {
+  const words = s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .split(/[^a-z0-9']+/)
+    .filter(Boolean);
+  if (words.length === 0) return true;
+  return words.every((w) => AUDIO_GENERIC_WORDS.has(w));
 }
 
-function extractAudioArtist(titulo: string, snippet: string): string | null {
-  const m = `${titulo} ${snippet}`.match(
-    /[dD]e\s+([A-ZÀ-ú][^,.;(?:]{2,40})\s*(?:\b(?:em alta|trend|viral|boom)\b|$)/,
+function cleanAudioPart(s: string): string {
+  let v = titutoLimpo(s)
+    .replace(/^(?:[\s:;,.\-–—"“”'‘`«»]+|🎵|🎶)+/, "")
+    .replace(/(?:[\s:;,.\-–—"”'`»]+|🎵|🎶)+$/, "");
+  v = v.replace(/^(\bfeat\b\.?|\bpart\b\.?|com|de:)?\s*/i, "");
+  return v.trim();
+}
+
+function cleanArtist(s: string | null): string | null {
+  if (!s) return null;
+  let v = cleanAudioPart(s);
+  for (let i = 0; i < 3; i++) {
+    const before = v;
+    v = v
+      .replace(
+        /(?:\s+(?:da|do|de|e|com))?\s*(?:semana|instagram|reels|reel|tiktok|momento|agora|hoje|202\d)$/i,
+        "",
+      )
+      .trim();
+    if (v === before && !/\s+[A-ZÀ-Ú]/.test(v)) break;
+  }
+  v = v.replace(/^o artista\s+/i, "").replace(/^a artista\s+/i, "");
+  v = v
+    .replace(/^(centos?|cantoras?|grupo|banda|dupla|dj|mc|singer|rapper|produtor)\s+/i, "")
+    .trim();
+  if (v.length < 3 || v.length > 40) return null;
+  if (isAudioGeneric(v)) return null;
+  return v;
+}
+
+function extractAudioArtistNear(text: string, from: number): string | null {
+  const after = text.slice(from);
+  const m = after.match(
+    /\b(?:de|do|da|por|cantad[oa]?s?\s+por|artista|com|feat\.?|part\.?)\s*(?:[:\-–])?\s*([A-ZÀ-Ú][\wÀ-ú.'&']+(?:\s+[A-ZÀ-Ú][\wÀ-ú.'&']+){0,4})/i,
   );
   if (!m) return null;
-  const name = (m[1] ?? "").trim();
-  return name.length > 2 && name.length <= 40 ? name : null;
+  return cleanArtist(m[1] ?? null);
+}
+
+function extractAudioArtistAnywhere(text: string): string | null {
+  const re =
+    /\b(?:de|do|da|por|cantad[oa]?s?\s+por)\s+(?:o|a|os|as)?\s*(?:cantor|cantora|grupo|banda|dupla|dj|mc|singer|rapper)?\s*([A-ZÀ-Ú][\wÀ-ú.'&']+(?:\s+[A-ZÀ-Ú][\wÀ-ú.'&']+){0,4})\b/gi;
+  let last: string | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    const got = cleanArtist(m[1] ?? null);
+    if (got) last = got;
+  }
+  return last;
+}
+
+function extractAudioMeta(
+  titulo: string,
+  snippet: string,
+): { nome: string; artista: string | null } | null {
+  const text = `${titulo ?? ""} ${snippet ?? ""}`;
+  if (
+    !/áudio|áudios|música|musica|músicas|musicas|trilha sonora|trend de áudio|som(?: |s |,)|sfx/i.test(
+      text,
+    )
+  )
+    return null;
+
+  const pick = (raw: string, from: number) => {
+    const nome = cleanAudioPart(raw).slice(0, 60);
+    if (!nome || isAudioGeneric(nome)) return null;
+    const artista = extractAudioArtistNear(text, from) ?? extractAudioArtistAnywhere(text);
+    return { nome, artista };
+  };
+
+  const quoted = text.match(/["“”'`«]([A-Za-zÀ-ú0-9][^"“”'`»]{2,60})["”'`»]/);
+  if (quoted) {
+    const idx = text.indexOf(quoted[0]);
+    const got = pick(quoted[1] ?? "", idx + quoted[0].length);
+    if (got) return got;
+  }
+
+  const labeled = text.match(
+    /\b(?:áudio|áudios|música|musica|músicas|musicas|trilha sonora|trend de áudio)\s*(?:que está em alta|em alta|do momento|da semana|nova|novo)?\s*:\s*["“']?([A-Za-zÀ-ú0-9][^,.;:!?()"]{2,60}?)\s*["”']?(?=\s*[,.]|\s+de\s+[A-ZÀ-Ú]|\s+por\s+[A-ZÀ-Ú]|\s+em alta|\s*$|$)/i,
+  );
+  if (labeled) {
+    const idx = (labeled.index ?? 0) + labeled[0].length;
+    const got = pick(labeled[1] ?? "", idx);
+    if (got) return got;
+  }
+
+  const adjacent = text.match(
+    /\b(?:áudio|música|musica|som|áudios|músicas|musicas)\s+(?:da|do|de|dessa|desse|essa|esse|em alta|que está bombando)?\s*["“']?([A-Za-zÀ-ú0-9][A-Za-zÀ-ú0-9 .'&’’]{2,60}?)\s*["”']?(?=(?:\s+(?:de|do|da|por|cantad[oa])\s+[A-ZÀ-Ú])|\s*\b(?:em alta|no reels|no instagram|bombando|viral|tem|\()|\s*$)/i,
+  );
+  if (adjacent) {
+    const idx = (adjacent.index ?? 0) + (adjacent[0] ?? "").length;
+    const got = pick(adjacent[1] ?? "", idx);
+    if (got) return got;
+  }
+
+  return null;
 }
 
 function parseAudioUsos(snippet: string): number | null {
@@ -1077,7 +1307,7 @@ function buildAudioPost(audio: InstaAudio, keywords: string[]): InstaAudioPost {
   const tema = keywords.slice(0, 3).length ? keywords.slice(0, 3).join(", ") : "seu nicho";
   const nome = (audio.track_name && audio.track_name.trim()) || audio.nome;
   const artist = (audio.artist_name && audio.artist_name.trim()) || audio.artista;
-  const nomeLimpo = nome.replace(/^[\s🎵]+/, "");
+  const nomeLimpo = nome.replace(/^[\s]+|^🎵/, "");
   const withArtist = artist ? ` — ${artist}` : "";
   const daySeed = Math.floor(Date.now() / 86_400_000);
   const gancho = INSTA_GANCHOS[daySeed % INSTA_GANCHOS.length] ?? INSTA_GANCHOS[0]!;
@@ -1121,9 +1351,7 @@ function buildAudioPost(audio: InstaAudio, keywords: string[]): InstaAudioPost {
       legenda,
       cta: "Salve este post para montar o vídeo e pesquisa o áudio pelo nome no editor de Reels.",
       hashtags: [
-        ...keywords
-          .slice(0, 5)
-          .map((k) => `#${k.replace(/[^a-zA-Z0-9À-ú]+/g, "")}`),
+        ...keywords.slice(0, 5).map((k) => `#${k.replace(/[^a-zA-Z0-9À-ú]+/g, "")}`),
         `#${slugTag(nomeLimpo)}`,
         ...(artist ? [`#${slugTag(artist)}`] : []),
         "#reels",
@@ -1451,9 +1679,7 @@ export const instaRadarAlertsMark = createServerFn({ method: "POST" })
 export const instaRadarAudioPost = createServerFn({ method: "POST" })
   .validator((d: InstaAudioPostInput) => d)
   .handler(
-    async ({
-      data,
-    }): Promise<{ success: boolean; error?: string; data?: InstaAudioPost }> => {
+    async ({ data }): Promise<{ success: boolean; error?: string; data?: InstaAudioPost }> => {
       const userId = await verifyUser(data.token);
       if (!userId) return { success: false, error: "Sessão expirada. Entre novamente." };
       try {
@@ -1541,6 +1767,50 @@ export const instaRadarAudioPreview = createServerFn({ method: "POST" })
       } catch (err) {
         console.error("[insta-radar] audio preview:", err);
         return { success: false, error: "Falha ao buscar a prévia da música.", found: false };
+      }
+    },
+  );
+
+export const instaRadarAudioResolve = createServerFn({ method: "POST" })
+  .validator((d: { token: string; id: string; term?: string; artista?: string }) => d)
+  .handler(
+    async ({
+      data,
+    }): Promise<{
+      success: boolean;
+      error?: string;
+      audio?: InstaAudio | null;
+    }> => {
+      const userId = await verifyUser(data.token);
+      if (!userId) return { success: false, error: "Sessão expirada. Entre novamente." };
+      try {
+        const admin: any = await getAdmin();
+        const { data: row } = await admin
+          .from("insta_radar_audios")
+          .select("*")
+          .eq("id", data.id)
+          .eq("user_id", userId)
+          .single();
+        if (!row) return { success: false, error: "Áudio não encontrado." };
+        const r: any = row;
+        const term = (data.term ?? "").trim() || String(r.nome);
+        const artista = (data.artista ?? "").trim() || r.artista || undefined;
+        const m = await resolveItunesAudio(term, artista);
+        const upd: Record<string, unknown> = { enrich_attempted_at: new Date().toISOString() };
+        if (m?.previewUrl) {
+          upd["preview_url"] = m.previewUrl;
+          upd["artwork_url"] = m.artworkUrl;
+          upd["itunes_url"] = m.itunesUrl;
+          upd["track_name"] = m.trackName;
+          upd["artist_name"] = m.artistName;
+          upd["nome"] = term;
+          if (artista) upd["artista"] = artista;
+        }
+        await admin.from("insta_radar_audios").update(upd).eq("id", data.id).eq("user_id", userId);
+        return { success: true, audio: { ...(r as InstaAudio), ...upd } };
+      } catch (err) {
+        console.error("[insta-radar] audio resolve:", err);
+        return { success: false, error: "Falha ao buscar a faixa agora. Tente em instantes." };
       }
     },
   );

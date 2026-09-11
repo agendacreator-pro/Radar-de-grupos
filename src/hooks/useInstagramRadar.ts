@@ -4,6 +4,7 @@ import {
   instaRadarAlertsMark,
   instaRadarAudioPost,
   instaRadarAudioPreview,
+  instaRadarAudioResolve,
   instaRadarContent,
   instaRadarDashboard,
   instaRadarPlanDelete,
@@ -127,6 +128,25 @@ export function useInstaRadarAudioPreview() {
       const token = await getToken();
       const res = await instaRadarAudioPreview({ data: { token, id } });
       if (!res.success) throw new Error(res.error ?? "Falha ao buscar a prévia da música");
+      return res.audio ?? null;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["instagram-radar"] });
+    },
+  });
+}
+
+export function useInstaRadarAudioResolve() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      id: string;
+      term?: string;
+      artista?: string;
+    }): Promise<InstaAudio | null> => {
+      const token = await getToken();
+      const res = await instaRadarAudioResolve({ data: { token, ...input } });
+      if (!res.success) throw new Error(res.error ?? "Falha ao buscar a faixa");
       return res.audio ?? null;
     },
     onSuccess: () => {

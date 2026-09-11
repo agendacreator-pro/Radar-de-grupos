@@ -19,6 +19,7 @@ import {
   Play,
   Radar,
   RefreshCw,
+  Search,
   Sparkles,
   Tags,
   Trash2,
@@ -70,6 +71,7 @@ import {
   useInstaPlanSave,
   useInstaRadarAudioPost,
   useInstaRadarAudioPreview,
+  useInstaRadarAudioResolve,
   useInstaRadarContent,
   useInstaRadarRun,
   useInstaRadarWipe,
@@ -361,10 +363,15 @@ function AudioCard({
   const [copied, setCopied] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [play, setPlay] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [term, setTerm] = useState(a.nome ?? "");
+  const [art, setArt] = useState(a.artista ?? "");
+  const resolve = useInstaRadarAudioResolve();
 
-  const nomeReels = (a.track_name && a.track_name.trim()) || a.nome;
-  const artistLabel = (a.artist_name && a.artist_name.trim()) || a.artista;
-  const preview = a.preview_url;
+  const cur = resolve.data ?? a;
+  const nomeReels = (cur.track_name && cur.track_name.trim()) || cur.nome;
+  const artistLabel = (cur.artist_name && cur.artist_name.trim()) || cur.artista;
+  const preview = cur.preview_url;
 
   async function handlePlay() {
     if (preview) {
@@ -405,14 +412,14 @@ function AudioCard({
     <Card className="overflow-hidden">
       <CardContent className="p-4">
         <div className="flex flex-wrap items-center gap-1.5">
-          <Badge className={INSTA_CICLO_CLASSES[a.ciclo]}>{INSTA_CICLO_LABELS[a.ciclo]}</Badge>
-          <FonteBadge fonte={a.fonte} detalhe={a.fonte_detalhe} />
+          <Badge className={INSTA_CICLO_CLASSES[cur.ciclo]}>{INSTA_CICLO_LABELS[cur.ciclo]}</Badge>
+          <FonteBadge fonte={cur.fonte} detalhe={cur.fonte_detalhe} />
         </div>
 
         <div className="mt-2 flex items-start gap-3">
-          {a.artwork_url ? (
+          {cur.artwork_url ? (
             <img
-              src={a.artwork_url}
+              src={cur.artwork_url}
               alt={`Capa de ${nomeReels}`}
               className="size-14 shrink-0 rounded-lg object-cover ring-1 ring-border"
               loading="lazy"
@@ -426,12 +433,12 @@ function AudioCard({
             <p className="flex items-start gap-1.5 break-words text-sm font-bold text-foreground">
               <ListMusic className="mt-0.5 size-4 shrink-0 text-[#E1306C]" />
               {nomeReels}
-              {a.track_name && a.track_name.trim() !== a.nome && (
+              {cur.track_name && cur.track_name.trim() !== cur.nome && (
                 <span
                   className="rounded bg-muted px-1 py-0.5 text-[10px] font-normal text-muted-foreground"
-                  title={`Nome encontrado nos sinais públicos: ${a.nome}`}
+                  title={`Nome encontrado nos sinais públicos: ${cur.nome}`}
                 >
-                  {a.nome.slice(0, 40)}
+                  {cur.nome.slice(0, 40)}
                 </span>
               )}
             </p>
@@ -497,32 +504,80 @@ function AudioCard({
               </Button>
             </div>
           )}
+          {!preview && (
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={() => setEditOpen((v) => !v)}
+                className="inline-flex items-center gap-1 text-[11px] font-medium text-[#E1306C] hover:underline"
+              >
+                <Search className="size-3" />
+                {editOpen ? "Ocultar busca manual" : "Não achou? Buscar por outro nome"}
+              </button>
+              {editOpen && (
+                <div className="mt-2 space-y-2 rounded-md border border-border bg-muted/40 p-2">
+                  <input
+                    value={term}
+                    onChange={(e) => setTerm(e.target.value)}
+                    placeholder="Nome da música"
+                    className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs outline-none ring-[#E1306C]/30 focus:ring-2"
+                  />
+                  <input
+                    value={art}
+                    onChange={(e) => setArt(e.target.value)}
+                    placeholder="Artista (opcional)"
+                    className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs outline-none ring-[#E1306C]/30 focus:ring-2"
+                  />
+                  <Button
+                    size="sm"
+                    className="w-full"
+                    disabled={resolve.isPending || !term.trim()}
+                    onClick={() =>
+                      void resolve.mutateAsync({ id: a.id, term: term.trim(), artista: art.trim() })
+                    }
+                  >
+                    {resolve.isPending ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : (
+                      <Search className="size-3" />
+                    )}
+                    Buscar faixa real
+                  </Button>
+                  {resolve.isError && (
+                    <p className="text-[11px] text-red-600">
+                      {resolve.error?.message ?? "Falha ao buscar agora."}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           {notice && <p className="mt-2 text-[11px] text-muted-foreground">{notice}</p>}
         </div>
 
         <div className="mt-3 space-y-1 text-xs text-muted-foreground">
-          <ScoreBar score={a.score} ciclo={a.ciclo} />
+          <ScoreBar score={cur.score} ciclo={cur.ciclo} />
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            {a.usos != null && a.usos > 0 ? (
+            {cur.usos != null && cur.usos > 0 ? (
               <span title="Valor observado na fonte pública">
-                ▶ usos observados: {a.usos.toLocaleString("pt-BR")}
+                ▶ usos observados: {cur.usos.toLocaleString("pt-BR")}
               </span>
             ) : (
               <span className="text-[11px]">usos: dado não disponível</span>
             )}
-            {a.crescimento > 0 && (
+            {cur.crescimento > 0 && (
               <span className="flex items-center gap-1 text-green-600">
                 <ArrowUp className="size-3" /> sinal de alta
               </span>
             )}
-            <span>🎯 compat {a.compat}%</span>
+            <span>🎯 compat {cur.compat}%</span>
           </div>
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-          {a.itunes_url && (
+          {cur.itunes_url && (
             <a
-              href={a.itunes_url}
+              href={cur.itunes_url}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-background px-3 text-muted-foreground hover:border-[#E1306C]/50 hover:text-[#E1306C]"
