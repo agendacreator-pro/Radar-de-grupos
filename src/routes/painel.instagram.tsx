@@ -46,6 +46,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
   INSTA_ALERT_TIPO_LABELS,
+  INSTA_AUDIO_STATUS_CLASSES,
+  INSTA_AUDIO_STATUS_LABELS,
   INSTA_CATEGORIA_LABELS,
   INSTA_CICLO_CLASSES,
   INSTA_CICLO_LABELS,
@@ -60,6 +62,7 @@ import {
   scoreLabel,
   type InstaAlert,
   type InstaAudio,
+  type InstaAudioStatus,
   type InstaCiclo,
   type InstaContent,
   type InstaPlan,
@@ -76,6 +79,7 @@ import {
   useInstaRadarContent,
   useInstaRadarRun,
   useInstaRadarWipe,
+  useInstaSaveAutoUpdate,
   useInstaSaveKeywords,
   useInstagramRadar,
 } from "@/hooks/useInstagramRadar";
@@ -230,12 +234,53 @@ function TrendCard({
 function speakNome(nome: string, artista?: string | null) {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
   window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(
-    `${artista ? `${artista}. ` : "Artista não identificado. "}${nome}.`,
-  );
+  const u = new SpeechSynthesisUtterance(`${artista ? `${artista}. ` : ""}${nome}.`);
   u.lang = "pt-BR";
   u.rate = 0.95;
   window.speechSynthesis.speak(u);
+}
+
+function AudioStatusBadge({ status }: { status?: InstaAudioStatus | null }) {
+  if (!status) return null;
+  return (
+    <Badge
+      variant="outline"
+      className={INSTA_AUDIO_STATUS_CLASSES[status]}
+      title="Classificação da tendência do áudio no ranking atual"
+    >
+      {INSTA_AUDIO_STATUS_LABELS[status]}
+    </Badge>
+  );
+}
+
+function RankChangeBadge({ a, title }: { a: InstaAudio; title: string }) {
+  const change = a.rank_change ?? 0;
+  if (change === 0)
+    return (
+      <span
+        className="inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+        title={title}
+      >
+        ➡ 0 no ranking
+      </span>
+    );
+  if (change > 0)
+    return (
+      <span
+        className="inline-flex items-center gap-0.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600"
+        title={title}
+      >
+        ▼ −{change}
+      </span>
+    );
+  return (
+    <span
+      className="inline-flex items-center gap-0.5 rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700"
+      title={title}
+    >
+      ▲ +{Math.abs(change)}
+    </span>
+  );
 }
 
 function AudioRankRow({
@@ -280,25 +325,61 @@ function AudioRankRow({
   }
 
   return (
-    <li className="flex flex-wrap items-center gap-2 py-2">
-      <span
-        className={cn(
-          "grid size-7 shrink-0 place-items-center rounded-full text-xs font-bold",
-          rank <= 3
-            ? "bg-gradient-to-br from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white"
-            : "bg-muted text-muted-foreground",
+    <li className="flex flex-wrap items-center gap-2 py-2.5">
+      <span className="flex shrink-0 items-center gap-1.5">
+        <span
+          className={cn(
+            "grid size-7 shrink-0 place-items-center rounded-full text-xs font-bold",
+            (a.rank ?? rank) <= 3
+              ? "bg-gradient-to-br from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white"
+              : "bg-muted text-muted-foreground",
+          )}
+          title={`${a.rank ?? rank}º no ranking de áudios em alta (video público observado, 1º = mais forte)`}
+        >
+          {a.rank ?? rank}
+        </span>
+        {a.artwork_url ? (
+          <img
+            src={a.artwork_url}
+            alt={`Capa de ${nomeReels}`}
+            className="size-9 shrink-0 rounded-md object-cover ring-1 ring-border"
+            loading="lazy"
+          />
+        ) : (
+          <span className="grid size-9 shrink-0 place-items-center rounded-md bg-gradient-to-br from-[#F58529] via-[#DD2A7B] to-[#8134AF]">
+            <Music2 className="size-4 text-white" />
+          </span>
         )}
-        title={`${rank}º mais ouvida em alta`}
-      >
-        {rank}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-semibold text-foreground">{nomeReels}</span>
-        <span className="block truncate text-xs text-muted-foreground">
-          🎤 {artistLabel ? artistLabel : "Artista não identificado"}
+        <span className="flex flex-wrap items-center gap-1.5">
+          <span className="block truncate text-sm font-semibold text-foreground">{nomeReels}</span>
+          {a.trend_status && <AudioStatusBadge status={a.trend_status} />}
+          {(a.rank_change ?? 0) !== 0 && (
+            <RankChangeBadge a={a} title="Variação vs. última execução do radar" />
+          )}
+        </span>
+        <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+          🎤 {artistLabel ? artistLabel : "artista não identificado"}
           {a.score > 0 && (
             <span className="ml-1.5">
               · score {a.score}/100 · 🎯 compat {a.compat}%
+            </span>
+          )}
+          {a.score_delta != null && a.score_delta !== 0 && (
+            <span
+              className={cn("ml-1.5", a.score_delta > 0 ? "text-green-600" : "text-red-600")}
+              title="Variação do score vs. última execução"
+            >
+              {a.score_delta > 0 ? `+${a.score_delta}` : a.score_delta} pts
+            </span>
+          )}
+          {a.growth_rate != null && a.growth_rate !== 0 && (
+            <span
+              className={cn("ml-1.5", a.growth_rate > 0 ? "text-green-600" : "text-red-600")}
+              title="Crescimento de usos vs. última execução (dado observado, em %) — apenas quando há números das duas execuções"
+            >
+              {a.growth_rate > 0 ? `▲ ${a.growth_rate}% usos` : `▼ ${a.growth_rate}% usos`}
             </span>
           )}
         </span>
@@ -392,8 +473,11 @@ function AudioCard({
           preview_url: m.previewUrl,
           artwork_url: m.artworkUrl,
           itunes_url: m.itunesUrl,
+          track_url: m.itunesUrl ?? null,
           track_name: m.trackName,
           artist_name: m.artistName,
+          album: m.album ?? null,
+          provider_id: m.providerId ?? null,
           provider: m.provider,
         });
         if (attached) setClientAudio(attached);
@@ -454,6 +538,10 @@ function AudioCard({
       <CardContent className="p-4">
         <div className="flex flex-wrap items-center gap-1.5">
           <Badge className={INSTA_CICLO_CLASSES[cur.ciclo]}>{INSTA_CICLO_LABELS[cur.ciclo]}</Badge>
+          {cur.trend_status && <AudioStatusBadge status={cur.trend_status} />}
+          {(cur.rank_change ?? 0) !== 0 && (
+            <RankChangeBadge a={cur} title="Variação de posição vs. última execução do radar" />
+          )}
           <FonteBadge fonte={cur.fonte} detalhe={cur.fonte_detalhe} />
         </div>
 
@@ -592,6 +680,29 @@ function AudioCard({
         <div className="mt-3 space-y-1 text-xs text-muted-foreground">
           <ScoreBar score={cur.score} ciclo={cur.ciclo} />
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {cur.rank != null && (
+              <span title="Posição no ranking de áudios em alta (1º = mais forte)">
+                #{cur.rank} no ranking
+              </span>
+            )}
+            {cur.score_delta != null && cur.score_delta !== 0 && (
+              <span
+                className={cn(cur.score_delta > 0 ? "text-green-600" : "text-red-600")}
+                title="Variação do score vs. última execução"
+              >
+                {cur.score_delta > 0 ? `+${cur.score_delta}` : cur.score_delta} pts no score
+              </span>
+            )}
+            {cur.growth_rate != null && cur.growth_rate !== 0 && (
+              <span
+                className={cn(cur.growth_rate > 0 ? "text-green-600" : "text-red-600")}
+                title="Crescimento de usos vs. última execução (dado observado)"
+              >
+                {cur.growth_rate > 0 ? "▲" : "▼"} {Math.abs(cur.growth_rate)}% usos
+              </span>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             {cur.usos != null && cur.usos > 0 ? (
               <span title="Valor observado na fonte pública">
                 ▶ usos observados: {cur.usos.toLocaleString("pt-BR")}
@@ -609,9 +720,9 @@ function AudioCard({
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-          {cur.itunes_url && (
+          {cur.track_url && (
             <a
-              href={cur.itunes_url}
+              href={cur.track_url}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-background px-3 text-muted-foreground hover:border-[#E1306C]/50 hover:text-[#E1306C]"
@@ -622,6 +733,14 @@ function AudioCard({
           {cur.provider === "deezer" && (
             <span className="inline-flex h-6 items-center gap-1 rounded bg-[#E1306C]/5 px-2 text-[10px] font-medium text-muted-foreground">
               🎵 prévia via Deezer
+            </span>
+          )}
+          {cur.album && (
+            <span
+              className="inline-flex h-6 items-center gap-1 rounded bg-muted px-2 text-[10px] font-medium text-muted-foreground"
+              title="Álbum em que a faixa foi encontrada"
+            >
+              💿 {cur.album}
             </span>
           )}
           <a
@@ -635,8 +754,11 @@ function AudioCard({
         </div>
 
         <p className="mt-2 rounded-md bg-[#E1306C]/5 px-2 py-1.5 text-[11px] text-muted-foreground">
-          💡 No app do Instagram: Reels → 🎵 → pesquisar <strong>“{nomeReels}”</strong> e usar no
-          seu vídeo.
+          <strong className="text-foreground">Dados observados</strong> — a música foi vista em
+          sinais públicos de áudio em alta no Instagram. Não temos acesso ao seu Instagram nem a
+          números oficiais de views. Prévia obtida via {providerLabel} (30s) — é um trecho legal,
+          não é o Reel original. Copie o nome, abra o Reels → 🎵 → pesquisar{" "}
+          <strong>"{nomeReels}"</strong> e use no seu vídeo.
         </p>
       </CardContent>
     </Card>
@@ -654,11 +776,14 @@ function RadarInstagramPage() {
   const audioPreview = useInstaRadarAudioPreview();
   const audioPost = useInstaRadarAudioPost();
   const wipe = useInstaRadarWipe();
+  const saveAuto = useInstaSaveAutoUpdate();
 
   const [kwInput, setKwInput] = useState("");
   const [cycleFilter, setCycleFilter] = useState<"todos" | InstaCiclo>("todos");
   type StatFilter = null | "auge" | "compat70" | "oport";
   const [statFilter, setStatFilter] = useState<StatFilter>(null);
+  const [audioView, setAudioView] = useState<"ranking" | "cards">("ranking");
+  const [audioStatusFilter, setAudioStatusFilter] = useState<"todos" | InstaAudioStatus>("todos");
   const [contentDialog, setContentDialog] = useState(false);
   const [content, setContent] = useState<InstaContent | null>(null);
   const [planDialog, setPlanDialog] = useState(false);
@@ -705,6 +830,11 @@ function RadarInstagramPage() {
     return out;
   }, [trends, cycleFilter, statFilter]);
 
+  const viewedAudios = useMemo(() => {
+    if (audioStatusFilter === "todos") return audios;
+    return audios.filter((a) => a.trend_status === audioStatusFilter);
+  }, [audios, audioStatusFilter]);
+
   function applyStatFilter(f: StatFilter, scrollTo: "trends" | "audios" | "alerts") {
     setStatFilter(f === statFilter ? null : f);
     setCycleFilter("todos");
@@ -739,6 +869,14 @@ function RadarInstagramPage() {
     toast.success(
       `Radar atualizado: ${rs?.total ?? 0} tendências (${rs?.novo ?? 0} novas), ${rs?.audio_count ?? 0} áudios, ${rs?.alertas ?? 0} alertas.`,
     );
+  }
+
+  async function toggleAutoUpdate() {
+    const next = !(config?.auto_update ?? true);
+    const res = await saveAuto.mutateAsync(next);
+    if (res.success)
+      toast.success(next ? "Atualização automática ligada." : "Atualização automática desligada.");
+    else toast.error(res.error);
   }
 
   function addKeyword() {
@@ -930,6 +1068,31 @@ function RadarInstagramPage() {
           </Button>
           <Button
             size="sm"
+            variant={config?.auto_update ? "default" : "outline"}
+            className={
+              config?.auto_update
+                ? "bg-gradient-to-r from-cyan-600 to-blue-600 text-white hover:from-cyan-700 hover:to-blue-700"
+                : ""
+            }
+            onClick={() => void toggleAutoUpdate()}
+            disabled={saveAuto.isPending || run.isPending}
+            title={
+              config?.auto_update
+                ? "Atualização automática ligada — clique para desligar"
+                : "Atualização automática desligada — clique para ligar"
+            }
+          >
+            {saveAuto.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : config?.auto_update ? (
+              <RefreshCw className="size-4" />
+            ) : (
+              <RefreshCw className="size-4 text-muted-foreground" />
+            )}
+            {config?.auto_update ? "Auto atualização: ON" : "Auto atualização: OFF"}
+          </Button>
+          <Button
+            size="sm"
             className="bg-gradient-to-r from-fuchsia-600 via-pink-600 to-orange-500 text-white hover:from-fuchsia-700 hover:via-pink-700 hover:to-orange-600"
             onClick={() => void openContent()}
             disabled={genContent.isPending || trends.length === 0}
@@ -1085,6 +1248,9 @@ function RadarInstagramPage() {
           {formatHora(config?.next_run_at)}
         </span>
       </div>
+      {data?.auto_run_hint && (
+        <p className="mt-2 text-[11px] text-muted-foreground">{data.auto_run_hint}</p>
+      )}
 
       {/* Content dialog below header (when opened) */}
       <ContentDialog
@@ -1175,50 +1341,110 @@ function RadarInstagramPage() {
 
       {/* Áudios em alta */}
       <section ref={audiosRef} className="mt-8 scroll-mt-24">
-        <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
-          <ListMusic className="size-5 text-[#E1306C]" />
-          Áudios em alta
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
+            <ListMusic className="size-5 text-[#E1306C]" />
+            Áudios em alta
+            {audios.length > 0 && (
+              <span className="text-sm font-normal text-muted-foreground">
+                ({viewedAudios.length} de {audios.length} músicas)
+              </span>
+            )}
+          </h2>
           {audios.length > 0 && (
-            <span className="text-sm font-normal text-muted-foreground">
-              ({audios.length} músicas listadas)
-            </span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setAudioStatusFilter("todos")}
+                className={cn(
+                  "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
+                  audioStatusFilter === "todos"
+                    ? "border-transparent bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white"
+                    : "border-border bg-background text-muted-foreground hover:border-[#E1306C]/50",
+                )}
+              >
+                Todos ({audios.length})
+              </button>
+              {(Object.keys(INSTA_AUDIO_STATUS_LABELS) as InstaAudioStatus[]).map((st) => (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => setAudioStatusFilter(audioStatusFilter === st ? "todos" : st)}
+                  className={cn(
+                    "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
+                    audioStatusFilter === st
+                      ? "border-transparent bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white"
+                      : "border-border bg-background text-muted-foreground hover:border-[#E1306C]/50",
+                  )}
+                  title={INSTA_AUDIO_STATUS_LABELS[st]}
+                >
+                  {INSTA_AUDIO_STATUS_LABELS[st]}
+                </button>
+              ))}
+              <span className="ml-1 inline-flex overflow-hidden rounded-md border border-border">
+                <button
+                  type="button"
+                  onClick={() => setAudioView("ranking")}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-medium",
+                    audioView === "ranking"
+                      ? "bg-[#E1306C]/10 text-[#C13584]"
+                      : "bg-background text-muted-foreground hover:bg-muted",
+                  )}
+                >
+                  <Trophy className="mr-1 inline size-3" />
+                  Ranking
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAudioView("cards")}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-medium",
+                    audioView === "cards"
+                      ? "bg-[#E1306C]/10 text-[#C13584]"
+                      : "bg-background text-muted-foreground hover:bg-muted",
+                  )}
+                >
+                  <Music2 className="mr-1 inline size-3" />
+                  Cards
+                </button>
+              </span>
+            </div>
           )}
-        </h2>
+        </div>
         {audios.length === 0 ? (
           <p className="mt-3 text-sm text-muted-foreground">
             Ainda sem áudios mapeados — dados observados aparecem após rodar o radar. Música/áudio
             de Reels é identificado por sinais públicos de "áudio em alta".
           </p>
+        ) : audioView === "ranking" ? (
+          <div className="mt-3 rounded-xl border border-border bg-card p-3 shadow-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="flex items-center gap-1.5 text-sm font-bold text-foreground">
+                <Trophy className="size-4 text-[#E1306C]" />
+                Ranking — músicas mais ouvidas em alta
+              </p>
+              <span className="text-[11px] text-muted-foreground">
+                ordenado pelo Trend Score (1º = mais forte). Clique em “Ouvir” para reproduzir a
+                prévia oficial.
+              </span>
+            </div>
+            <ol className="mt-1 divide-y divide-border">
+              {viewedAudios.map((a, i) => (
+                <AudioRankRow
+                  key={a.id}
+                  a={a}
+                  rank={i + 1}
+                  onPreview={(id) => audioPreview.mutateAsync(id)}
+                  onPost={(id) => openAudioPost(id)}
+                />
+              ))}
+            </ol>
+          </div>
         ) : (
           <>
-            {/* Ranking das mais ouvidas */}
-            <div className="mt-3 rounded-xl border border-border bg-card p-3 shadow-sm">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="flex items-center gap-1.5 text-sm font-bold text-foreground">
-                  <Trophy className="size-4 text-[#E1306C]" />
-                  Ranking — músicas mais ouvidas em alta
-                </p>
-                <span className="text-[11px] text-muted-foreground">
-                  ordem pela tendência observada (1º = mais forte). Clique em “Ouvir” para
-                  reproduzir.
-                </span>
-              </div>
-              <ol className="mt-1 divide-y divide-border">
-                {audios.map((a, i) => (
-                  <AudioRankRow
-                    key={a.id}
-                    a={a}
-                    rank={i + 1}
-                    onPreview={(id) => audioPreview.mutateAsync(id)}
-                    onPost={(id) => openAudioPost(id)}
-                  />
-                ))}
-              </ol>
-            </div>
-
-            {/* Detalhe em cards */}
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {audios.map((a) => (
+              {viewedAudios.map((a) => (
                 <AudioCard
                   key={a.id}
                   a={a}

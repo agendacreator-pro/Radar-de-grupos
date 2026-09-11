@@ -11,6 +11,7 @@ import {
   instaRadarPlanDelete,
   instaRadarPlanSave,
   instaRadarRun,
+  instaRadarSaveAutoUpdate,
   instaRadarSaveKeywords,
   instaRadarWipe,
 } from "@/lib/instagram-radar-engine";
@@ -166,8 +167,11 @@ export function useInstaRadarAudioClientResolve() {
       preview_url?: string | null;
       artwork_url?: string | null;
       itunes_url?: string | null;
+      track_url?: string | null;
       track_name?: string | null;
       artist_name?: string | null;
+      album?: string | null;
+      provider_id?: string | null;
       provider?: string | null;
     }): Promise<InstaAudio | null> => {
       const token = await getToken();
@@ -199,6 +203,19 @@ export function useInstaRadarWipe() {
     mutationFn: async () => {
       const token = await getToken();
       return instaRadarWipe({ data: { token } });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["instagram-radar"] });
+    },
+  });
+}
+
+export function useInstaSaveAutoUpdate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (enabled: boolean) => {
+      const token = await getToken();
+      return instaRadarSaveAutoUpdate({ data: { token, enabled } });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["instagram-radar"] });

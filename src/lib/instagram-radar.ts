@@ -98,6 +98,32 @@ export type InstaTrend = {
   coletado_em: string;
 };
 
+export type InstaAudioStatus = "viral" | "crescendo" | "nova" | "consolidada" | "perdendo";
+
+export const INSTA_AUDIO_STATUS_LABELS: Record<InstaAudioStatus, string> = {
+  viral: "🔥 Viral",
+  crescendo: "📈 Crescendo",
+  nova: "🆕 Nova tendência",
+  consolidada: "⭐ Consolidada",
+  perdendo: "📉 Perdendo força",
+};
+
+export const INSTA_AUDIO_STATUS_CLASSES: Record<InstaAudioStatus, string> = {
+  viral: "border-red-300 bg-red-50 text-red-700",
+  crescendo: "border-green-300 bg-green-50 text-green-700",
+  nova: "border-cyan-300 bg-cyan-50 text-cyan-700",
+  consolidada: "border-amber-300 bg-amber-50 text-amber-800",
+  perdendo: "border-slate-300 bg-slate-100 text-slate-600",
+};
+
+export function formatTrendChange(change: number | null | undefined, sig?: "▲" | "▼"): string {
+  if (change == null) return "—";
+  const n = Math.round(change);
+  const arrow = sig ?? (n > 0 ? "▲" : n < 0 ? "▼" : "➡");
+  if (n === 0) return "➡ 0";
+  return `${arrow} ${Math.abs(n)}`;
+}
+
 export type InstaAudio = {
   id: string;
   nome: string;
@@ -117,8 +143,20 @@ export type InstaAudio = {
   itunes_url?: string | null;
   track_name?: string | null;
   artist_name?: string | null;
+  album?: string | null;
+  provider_id?: string | null;
+  track_url?: string | null;
   enrich_attempted_at?: string | null;
   provider?: string | null;
+  trend_status?: InstaAudioStatus | null;
+  rank?: number | null;
+  previous_rank?: number | null;
+  rank_change?: number | null;
+  score_delta?: number | null;
+  growth_rate?: number | null;
+  first_seen_at?: string | null;
+  last_seen_at?: string | null;
+  seen_count?: number | null;
 };
 
 export type InstaAlertTipo =
@@ -172,6 +210,17 @@ export type InstaConfig = {
   last_run_at: string | null;
   next_run_at: string | null;
   alert_count: number;
+  auto_update: boolean;
+};
+
+export type InstaAudioSnapshot = {
+  key: string;
+  nome: string;
+  artista: string | null;
+  score: number;
+  usos: number | null;
+  crescimento: number;
+  rank: number;
 };
 
 export type InstaHistory = {
@@ -185,6 +234,7 @@ export type InstaHistory = {
     alertas?: number;
     fonte?: string;
     duracao?: number;
+    audios?: InstaAudioSnapshot[];
   };
   criado_em: string;
 };
@@ -240,9 +290,11 @@ export type InstaDashboard = {
     na_auge: number;
     nicho_alta: number;
     audio_em_alta: number;
+    audio_subindo: number;
     alertas_nao_lidos: number;
     oport_hoje: number;
   };
+  auto_run_hint: string;
 };
 
 export const INSTA_DEFAULT_KEYWORDS = [
