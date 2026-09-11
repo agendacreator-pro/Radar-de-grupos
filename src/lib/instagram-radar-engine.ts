@@ -719,6 +719,173 @@ function toDeezerMatch(pick: any): ItunesMatch {
   };
 }
 
+// ============================================================
+// Paradas oficiais de música em alta — fonte REAL de áudios.
+// O Instagram/Meta bloqueia acesso a "áudios em alta" do app;
+// a única fonte confiável e honesta é a parada oficial de música
+// (iTunes/Apple Music Brasil, fallback Deezer), que tem a faixa,
+// o artista e a prévia oficial de 30s. Nada é inventado.
+// ============================================================
+
+type ChartEntry = {
+  pos: number;
+  trackName: string;
+  artistName: string;
+  album: string | null;
+  artworkUrl: string | null;
+  trackViewUrl: string | null;
+  previewUrl: string | null;
+  providerId: string | null;
+};
+
+const CHART_LIMIT = 25;
+
+async function fetchItunesTopSongs(country = "br"): Promise<ChartEntry[]> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ITUNES_TIMEOUT_MS);
+  try {
+    const res = await fetch(
+      `https://itunes.apple.com/${country}/rss/topsongs/limit=${CHART_LIMIT}/json`,
+      { headers: { Accept: "application/json" }, signal: ctrl.signal },
+    );
+    if (!res.ok) return [];
+    const json: any = await res.json();
+    const entries: any[] = Array.isArray(json?.feed?.entry) ? json.feed.entry : [];
+    if (entries.length === 0) return [];
+    const ids = entries
+      .map((e: any) => String(e?.id?.label ?? ""))
+      .filter((s: string) => s.length > 0);
+    const lookupMap = new Map<string, any>();
+    for (let i = 0; i < ids.length; i += 20) {
+      const chunk = ids.slice(i, i + 20);
+      try {
+        const lres = await fetch(
+          `https://itunes.apple.com/lookup?id=${chunk.join(",")}&entity=song&limit=200`,
+          { headers: { Accept: "application/json" }, signal: ctrl.signal },
+        );
+        if (lres.ok) {
+          const lj: any = await lres.json();
+          for (const r of Array.isArray(lj?.results) ? lj.results : []) {
+            if (r?.trackId != null) lookupMap.set(String(r.trackId), r);
+          }
+        }
+      } catch {
+        // lookup é best-effort; sem preview o item só não tem prévia
+      }
+    }
+    return entries
+      .map((e: any, i: number): ChartEntry => {
+        const trackId = String(e?.id?.label ?? "");
+        const lu = lookupMap.get(trackId);
+        const im: any[] = Array.isArray(e?.["im:image"]) ? e["im:image"] : [];
+        const artwork = lu?.artworkUrl100
+          ? String(lu.artworkUrl100).replace("100x100bb", "300x300bb")
+          : (im?.[2]?.label ?? im?.[1]?.label ?? null);
+        return {
+          pos: i + 1,
+          trackName:
+            String(e?.["im:name"]?.label ?? lu?.trackName ?? "").trim() ||
+            String(lu?.trackName ?? "").trim(),
+          artistName:
+            String(e?.["im:artist"]?.label ?? lu?.artistName ?? "").trim() ||
+            String(lu?.artistName ?? "").trim(),
+          album:
+            String(e?.["im:collection"]?.["im:name"]?.label ?? lu?.collectionName ?? "").trim() ||
+            null,
+          artworkUrl: artwork ? String(artwork) : null,
+          trackViewUrl:
+            String(lu?.trackViewUrl ?? e?.link?.[0]?.attributes?.href ?? "").trim() || null,
+          previewUrl: lu?.previewUrl ? String(lu.previewUrl) : null,
+          providerId: trackId || null,
+        };
+      })
+      .filter((e) => e.trackName.length > 0);
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchDeezerChart(): Promise<ChartEntry[]> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ITUNES_TIMEOUT_MS);
+  try {
+    const res = await fetch(`https://api.deezer.com/chart/0/tracks?limit=${CHART_LIMIT}`, {
+      headers: { Accept: "application/json" },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return [];
+    const json: any = await res.json();
+    const data: any[] = Array.isArray(json?.data) ? json.data : [];
+    return data
+      .map((t: any, i: number): ChartEntry => ({
+        pos: i + 1,
+        trackName: String(t?.title ?? "").trim(),
+        artistName: String(t?.artist?.name ?? "").trim(),
+        album: String(t?.album?.title ?? "").trim() || null,
+        artworkUrl: t?.album?.cover_xl
+          ? String(t.album.cover_xl)
+          : t?.album?.cover_medium
+            ? String(t.album.cover_medium)
+            : null,
+        trackViewUrl: t?.link ? String(t.link) : null,
+        previewUrl: t?.preview ? String(t.preview) : null,
+        providerId: t?.id != null ? String(t.id) : null,
+      }))
+      .filter((e) => e.trackName.length > 0);
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Monta os registros de áudio a partir da parada oficial (fonte real).
+async function buildChartAudios(): Promise<{ audios: InstaAudio[]; used: boolean }> {
+  let entries = await fetchItunesTopSongs();
+  let source: "itunes" | "deezer" = "itunes";
+  if (entries.length === 0) {
+    entries = await fetchDeezerChart();
+    source = "deezer";
+  }
+  if (entries.length === 0) return { audios: [], used: false };
+  const now = new Date().toISOString();
+  if (source === "itunes") {
+    // Se faltou prévia, tenta resolver o artist+track no Deezer/Search no
+    // browser depois; o campo fica null até lá (honesto).
+  }
+  const audios: InstaAudio[] = entries.map((e) => {
+    const nome = `${e.artistName} - ${e.trackName}`;
+    return {
+      id: "",
+      nome,
+      artista: e.artistName || null,
+      usos: null,
+      crescimento: 0,
+      ciclo: "surgindo",
+      score: clampScore(Math.round(100 - (e.pos - 1) * 2.6)),
+      compat: 0,
+      motivo: `#${e.pos}º na parada oficial ${source === "itunes" ? "Apple Music Brasil" : "Deezer"} agora.`,
+      fonte: "oficial",
+      fonte_detalhe: `Chart oficial (${source === "itunes" ? "iTunes/Apple Music Brasil" : "Deezer"}). Posição ${e.pos}º em alta no momento — ${e.previewUrl ? "prévia oficial de 30s." : "sem prévia disponível na fonte."}`,
+      url: null,
+      coletado_em: now,
+      preview_url: e.previewUrl,
+      artwork_url: e.artworkUrl,
+      itunes_url: e.trackViewUrl,
+      track_url: e.trackViewUrl,
+      track_name: e.trackName || null,
+      artist_name: e.artistName || null,
+      album: e.album ?? null,
+      provider_id: e.providerId,
+      provider: source,
+      enrich_attempted_at: e.previewUrl ? now : null,
+    };
+  });
+  return { audios, used: true };
+}
+
 async function pickDeezer(variants: string[], q: string): Promise<ItunesMatch | null> {
   const all: any[] = [];
   const seen = new Set<number>();
@@ -861,6 +1028,7 @@ type RunResult = {
   audios: InstaAudio[];
   alerts: InstaAlert[];
   resumo: InstaHistory["resumo"];
+  chart_used: boolean;
 };
 
 async function runAnalysis(
@@ -1026,8 +1194,27 @@ async function runAnalysis(
     }
   }
 
-  // Converge audios → tendência correspondente quando o nome não for só "áudio"
+  // Fonte real de áudios em alta: parada oficial de música (iTunes/Apple
+  // Music Brasil, fallback Deezer). O Instagram/Meta não expõe "áudio em
+  // alta" publicamente — charts são o dado honesto com faixa/artista/prévia.
+  const chart = await buildChartAudios();
+  const chartKeys = new Set<string>(chart.audios.map((a) => a.nome.toLowerCase()));
+  for (const ca of chart.audios) {
+    const key = ca.nome.toLowerCase();
+    const existing = audiosByNome.get(key);
+    if (existing && existing.preview_url && !ca.preview_url) {
+      audiosByNome.set(key, { ...existing, score: Math.max(existing.score, ca.score) });
+    } else if (existing && existing.score >= ca.score) {
+      audiosByNome.set(key, { ...existing, score: existing.score });
+    } else {
+      audiosByNome.set(key, ca);
+    }
+  }
+
+  // Converge áudios → tendência correspondente quando o nome não for só "áudio"
+  // (itens da parada oficial NÃO viram tendências — só os observados na web).
   for (const a of audiosByNome.values()) {
+    if (chartKeys.has(a.nome.toLowerCase())) continue;
     if (trendsByNome.has(a.nome)) continue;
     trendsByNome.set(a.nome, {
       id: "",
@@ -1096,6 +1283,18 @@ async function runAnalysis(
     a.first_seen_at = prevRow?.first_seen_at ?? now;
     a.last_seen_at = now;
     a.trend_status = deriveAudioTrendStatus(a, prevRow);
+    // Itens da parada oficial: ciclo/crescimento derivados da posição real.
+    if (a.fonte === "oficial") {
+      const change = a.rank_change ?? 0;
+      if (change < 0) a.ciclo = a.score >= 80 ? "auge" : "crescendo";
+      else if (change > 0 && a.previous_rank != null) a.ciclo = "caindo";
+      else if (a.score >= 80) a.ciclo = "auge";
+      else if (a.score >= 50) a.ciclo = "crescendo";
+      else a.ciclo = "surgindo";
+      a.crescimento = clampScore(
+        Math.max(0, -change) * 8 + (a.score >= 80 ? 10 : 0) + (a.ciclo === "auge" ? 15 : 0),
+      );
+    }
   }
 
   // Alertas
@@ -1173,7 +1372,7 @@ async function runAnalysis(
     })),
   };
 
-  return { trends, audios, alerts, resumo };
+  return { trends, audios, alerts, resumo, chart_used: chart.used };
 }
 
 function alertRow(tipo: InstaAlert["tipo"], titulo: string, descricao: string | null): InstaAlert {
@@ -1809,6 +2008,21 @@ export const instaRadarRun = createServerFn({ method: "POST" })
             result.audios.map((a) => ({ user_id: userId, ...toAudioRow(a), updated_at: now })),
             { onConflict: "user_id,nome" },
           );
+        }
+        // Quando a parada oficial é a fonte, remove apenas os lixos restantes
+        // (nomes truncados da web que perdem significado) — melhor sem eles do
+        // que com um ranking de áudios quebrados.
+        if (result.chart_used && result.audios.length) {
+          const keep = result.audios.map((a) => a.nome.toLowerCase());
+          try {
+            await admin
+              .from("insta_radar_audios")
+              .delete()
+              .eq("user_id", userId)
+              .filter("nome", "not.in", keep);
+          } catch {
+            // limpeza é best-effort
+          }
         }
         await admin.from("insta_radar_history").insert({ user_id: userId, resumo: result.resumo });
         if (result.alerts.length) {

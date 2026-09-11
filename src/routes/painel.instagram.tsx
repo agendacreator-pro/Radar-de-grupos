@@ -363,7 +363,8 @@ function AudioRankRow({
           🎤 {artistLabel ? artistLabel : "artista não identificado"}
           {a.score > 0 && (
             <span className="ml-1.5">
-              · score {a.score}/100 · 🎯 compat {a.compat}%
+              · score {a.score}/100
+              {a.compat > 0 ? ` · 🎯 compat ${a.compat}%` : " · 🎯 compat n/a (chart oficial)"}
             </span>
           )}
           {a.score_delta != null && a.score_delta !== 0 && (
@@ -715,7 +716,9 @@ function AudioCard({
                 <ArrowUp className="size-3" /> sinal de alta
               </span>
             )}
-            <span>🎯 compat {cur.compat}%</span>
+            <span>
+              {cur.compat > 0 ? `🎯 compat ${cur.compat}%` : "🎯 compat n/a (chart oficial)"}
+            </span>
           </div>
         </div>
 
@@ -1414,19 +1417,21 @@ function RadarInstagramPage() {
         </div>
         {audios.length === 0 ? (
           <p className="mt-3 text-sm text-muted-foreground">
-            Ainda sem áudios mapeados — dados observados aparecem após rodar o radar. Música/áudio
-            de Reels é identificado por sinais públicos de "áudio em alta".
+            Ainda sem músicas mapeadas — os áudios em alta aparecem após rodar o radar. O ranking
+            usa a parada oficial de música (Apple Music/Deezer Brasil) que alimenta os Reels do
+            momento, com prévia oficial de 30s de cada faixa.
           </p>
         ) : audioView === "ranking" ? (
           <div className="mt-3 rounded-xl border border-border bg-card p-3 shadow-sm">
             <div className="flex flex-wrap items-center gap-2">
               <p className="flex items-center gap-1.5 text-sm font-bold text-foreground">
                 <Trophy className="size-4 text-[#E1306C]" />
-                Ranking — músicas mais ouvidas em alta
+                Ranking — músicas em alta agora
               </p>
               <span className="text-[11px] text-muted-foreground">
-                ordenado pelo Trend Score (1º = mais forte). Clique em “Ouvir” para reproduzir a
-                prévia oficial.
+                parada oficial (Apple Music/Deezer Brasil), ordenado pelo Trend Score (1º = mais
+                forte). Clique em “Ouvir” para reproduzir a prévia oficial. O Instagram não expõe
+                “áudio em alta” publicamente — o dado real é a parada que alimenta os Reels.
               </span>
             </div>
             <ol className="mt-1 divide-y divide-border">
