@@ -562,6 +562,7 @@ function toAudioRow(a: InstaAudio): Record<string, unknown> {
   return {
     nome: a.nome,
     artista: a.artista,
+    genero: a.genero ?? null,
     usos: a.usos,
     crescimento: a.crescimento,
     motivo: a.motivo,
@@ -731,6 +732,7 @@ type ChartEntry = {
   pos: number;
   trackName: string;
   artistName: string;
+  genre: string | null;
   album: string | null;
   artworkUrl: string | null;
   trackViewUrl: string | null;
@@ -792,6 +794,13 @@ async function fetchItunesTopSongs(country = "br"): Promise<ChartEntry[]> {
           album:
             String(e?.["im:collection"]?.["im:name"]?.label ?? lu?.collectionName ?? "").trim() ||
             null,
+          // Estilo musical oficial do iTunes (ex.: Funk Carioca, Sertanejo,
+          // Forró, MPB). Fallback para o rótulo da categoria do RSS quando o
+          // lookup não tiver achado a faixa.
+          genre:
+            String(lu?.primaryGenreName ?? "").trim() ||
+            String(e?.["category"]?.attributes?.label ?? "").trim() ||
+            null,
           artworkUrl: artwork ? String(artwork) : null,
           trackViewUrl:
             String(lu?.trackViewUrl ?? e?.link?.[0]?.attributes?.href ?? "").trim() || null,
@@ -811,6 +820,23 @@ async function fetchDeezerChart(): Promise<ChartEntry[]> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), ITUNES_TIMEOUT_MS);
   try {
+    // Mapa id→nome de estilos do Deezer (best-effort; fallback só entra se o
+    // iTunes falhar). Chart de tracks não expõe o nome do gênero por item.
+    const genreNameById = new Map<number, string>();
+    try {
+      const gres = await fetch("https://api.deezer.com/genre", {
+        headers: { Accept: "application/json" },
+        signal: ctrl.signal,
+      });
+      if (gres.ok) {
+        const gjson: any = await gres.json();
+        for (const g of Array.isArray(gjson?.data) ? gjson.data : []) {
+          if (g?.id != null && g?.name) genreNameById.set(Number(g.id), String(g.name));
+        }
+      }
+    } catch {
+      // sem estilos é aceitável no fallback
+    }
     const res = await fetch(`https://api.deezer.com/chart/0/tracks?limit=${CHART_LIMIT}`, {
       headers: { Accept: "application/json" },
       signal: ctrl.signal,
@@ -819,20 +845,24 @@ async function fetchDeezerChart(): Promise<ChartEntry[]> {
     const json: any = await res.json();
     const data: any[] = Array.isArray(json?.data) ? json.data : [];
     return data
-      .map((t: any, i: number): ChartEntry => ({
-        pos: i + 1,
-        trackName: String(t?.title ?? "").trim(),
-        artistName: String(t?.artist?.name ?? "").trim(),
-        album: String(t?.album?.title ?? "").trim() || null,
-        artworkUrl: t?.album?.cover_xl
-          ? String(t.album.cover_xl)
-          : t?.album?.cover_medium
-            ? String(t.album.cover_medium)
-            : null,
-        trackViewUrl: t?.link ? String(t.link) : null,
-        previewUrl: t?.preview ? String(t.preview) : null,
-        providerId: t?.id != null ? String(t.id) : null,
-      }))
+      .map((t: any, i: number): ChartEntry => {
+        const gid = t?.genre_id != null ? Number(t.genre_id) : null;
+        return {
+          pos: i + 1,
+          trackName: String(t?.title ?? "").trim(),
+          artistName: String(t?.artist?.name ?? "").trim(),
+          genre: gid != null ? (genreNameById.get(gid) ?? null) : null,
+          album: String(t?.album?.title ?? "").trim() || null,
+          artworkUrl: t?.album?.cover_xl
+            ? String(t.album.cover_xl)
+            : t?.album?.cover_medium
+              ? String(t.album.cover_medium)
+              : null,
+          trackViewUrl: t?.link ? String(t.link) : null,
+          previewUrl: t?.preview ? String(t.preview) : null,
+          providerId: t?.id != null ? String(t.id) : null,
+        };
+      })
       .filter((e) => e.trackName.length > 0);
   } catch {
     return [];
@@ -861,14 +891,15 @@ async function buildChartAudios(): Promise<{ audios: InstaAudio[]; used: boolean
       id: "",
       nome,
       artista: e.artistName || null,
+      genero: e.genre,
       usos: null,
       crescimento: 0,
       ciclo: "surgindo",
       score: clampScore(Math.round(100 - (e.pos - 1) * 2.6)),
       compat: 0,
-      motivo: `#${e.pos}º na parada oficial ${source === "itunes" ? "Apple Music Brasil" : "Deezer"} agora.`,
+      motivo: `#${e.pos}º na parada oficial ${source === "itunes" ? "Apple Music Brasil" : "Deezer"} agora${e.genre ? ` (${e.genre})` : ""}.`,
       fonte: "oficial",
-      fonte_detalhe: `Chart oficial (${source === "itunes" ? "iTunes/Apple Music Brasil" : "Deezer"}). Posição ${e.pos}º em alta no momento — ${e.previewUrl ? "prévia oficial de 30s." : "sem prévia disponível na fonte."}`,
+      fonte_detalhe: `Chart oficial (${source === "itunes" ? "iTunes/Apple Music Brasil" : "Deezer"}). Posição ${e.pos}º em alta no momento${e.genre ? ` — estilo ${e.genre}` : ""}. ${e.previewUrl ? "Prévia oficial de 30s." : "Sem prévia disponível na fonte."}`,
       url: null,
       coletado_em: now,
       preview_url: e.previewUrl,

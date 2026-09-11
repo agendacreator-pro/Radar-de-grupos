@@ -8,6 +8,7 @@ import {
   Check,
   CheckCircle2,
   Copy,
+  Disc3,
   ExternalLink,
   Flame,
   Info,
@@ -361,6 +362,7 @@ function AudioRankRow({
         </span>
         <span className="mt-0.5 block truncate text-xs text-muted-foreground">
           🎤 {artistLabel ? artistLabel : "artista não identificado"}
+          {a.genero && <span className="ml-1.5">· estilo: {a.genero}</span>}
           {a.score > 0 && (
             <span className="ml-1.5">
               · score {a.score}/100
@@ -746,6 +748,14 @@ function AudioCard({
               💿 {cur.album}
             </span>
           )}
+          {cur.genero && (
+            <span
+              className="inline-flex h-6 items-center gap-1 rounded bg-muted px-2 text-[10px] font-medium text-muted-foreground"
+              title="Estilo musical em alta (parada oficial)"
+            >
+              <Disc3 className="size-3" /> {cur.genero}
+            </span>
+          )}
           <a
             href={ytSearch}
             target="_blank"
@@ -787,6 +797,7 @@ function RadarInstagramPage() {
   const [statFilter, setStatFilter] = useState<StatFilter>(null);
   const [audioView, setAudioView] = useState<"ranking" | "cards">("ranking");
   const [audioStatusFilter, setAudioStatusFilter] = useState<"todos" | InstaAudioStatus>("todos");
+  const [audioGeneroFilter, setAudioGeneroFilter] = useState<string>("todos");
   const [contentDialog, setContentDialog] = useState(false);
   const [content, setContent] = useState<InstaContent | null>(null);
   const [planDialog, setPlanDialog] = useState(false);
@@ -834,9 +845,43 @@ function RadarInstagramPage() {
   }, [trends, cycleFilter, statFilter]);
 
   const viewedAudios = useMemo(() => {
-    if (audioStatusFilter === "todos") return audios;
-    return audios.filter((a) => a.trend_status === audioStatusFilter);
-  }, [audios, audioStatusFilter]);
+    let out = audios;
+    if (audioStatusFilter !== "todos")
+      out = out.filter((a) => a.trend_status === audioStatusFilter);
+    if (audioGeneroFilter !== "todos")
+      out = out.filter((a) => (a.genero ?? "Outros estilos") === audioGeneroFilter);
+    return out;
+  }, [audios, audioStatusFilter, audioGeneroFilter]);
+
+  // Estilos musicais presentes no ranking (para separar por estilo em alta).
+  const generos = useMemo(() => {
+    const s = new Set<string>();
+    for (const a of audios) if (a.genero) s.add(a.genero);
+    return [...s].sort((x, y) => x.localeCompare(y, "pt-BR"));
+  }, [audios]);
+
+  // Agrupa as músicas por estilo quando o filtro é "Todos".
+  const generoChunks = useMemo(() => {
+    const groups = new Map<string, InstaAudio[]>();
+    for (const a of viewedAudios) {
+      const g = a.genero ?? "Outros estilos";
+      groups.set(g, [...(groups.get(g) ?? []), a]);
+    }
+    return [...groups.entries()]
+      .map(([g, items]) => ({ g, items }))
+      .sort((x, y) => y.items.length - x.items.length);
+  }, [viewedAudios]);
+
+  // Contagem por estilo em todo o cardume (para os chips de filtro).
+  const generoNamedCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const a of audios) {
+      const g = a.genero ?? "Outros estilos";
+      m.set(g, (m.get(g) ?? 0) + 1);
+    }
+    return m;
+  }, [audios]);
+  const hasSemEstilo = (generoNamedCounts.get("Outros estilos") ?? 0) > 0;
 
   function applyStatFilter(f: StatFilter, scrollTo: "trends" | "audios" | "alerts") {
     setStatFilter(f === statFilter ? null : f);
@@ -1384,6 +1429,52 @@ function RadarInstagramPage() {
                   {INSTA_AUDIO_STATUS_LABELS[st]}
                 </button>
               ))}
+              {generos.length > 0 && (
+                <>
+                  <span className="ml-1 text-xs font-semibold text-muted-foreground">Estilo:</span>
+                  <button
+                    type="button"
+                    onClick={() => setAudioGeneroFilter("todos")}
+                    className={cn(
+                      "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
+                      audioGeneroFilter === "todos"
+                        ? "border-transparent bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white"
+                        : "border-border bg-background text-muted-foreground hover:border-[#E1306C]/50",
+                    )}
+                  >
+                    Todos ({[...generoNamedCounts.entries()].reduce((n, [, c]) => n + c, 0)})
+                  </button>
+                  {generos.map((g) => (
+                    <button
+                      key={g}
+                      type="button"
+                      onClick={() => setAudioGeneroFilter(audioGeneroFilter === g ? "todos" : g)}
+                      className={cn(
+                        "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
+                        audioGeneroFilter === g
+                          ? "border-transparent bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white"
+                          : "border-border bg-background text-muted-foreground hover:border-[#E1306C]/50",
+                      )}
+                    >
+                      {g} ({generoNamedCounts.get(g) ?? 0})
+                    </button>
+                  ))}
+                  {hasSemEstilo && (
+                    <button
+                      type="button"
+                      onClick={() => setAudioGeneroFilter("Outros estilos")}
+                      className={cn(
+                        "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
+                        audioGeneroFilter === "Outros estilos"
+                          ? "border-transparent bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white"
+                          : "border-border bg-background text-muted-foreground hover:border-[#E1306C]/50",
+                      )}
+                    >
+                      Outros ({generoNamedCounts.get("Outros estilos") ?? 0})
+                    </button>
+                  )}
+                </>
+              )}
               <span className="ml-1 inline-flex overflow-hidden rounded-md border border-border">
                 <button
                   type="button"
@@ -1430,21 +1521,52 @@ function RadarInstagramPage() {
               </p>
               <span className="text-[11px] text-muted-foreground">
                 parada oficial (Apple Music/Deezer Brasil), ordenado pelo Trend Score (1º = mais
-                forte). Clique em “Ouvir” para reproduzir a prévia oficial. O Instagram não expõe
-                “áudio em alta” publicamente — o dado real é a parada que alimenta os Reels.
+                forte) e separado por estilo musical em alta. Clique em “Ouvir” para reproduzir a
+                prévia oficial. O Instagram não expõe “áudio em alta” publicamente — o dado real é a
+                parada que alimenta os Reels.
               </span>
             </div>
-            <ol className="mt-1 divide-y divide-border">
-              {viewedAudios.map((a, i) => (
-                <AudioRankRow
-                  key={a.id}
-                  a={a}
-                  rank={i + 1}
-                  onPreview={(id) => audioPreview.mutateAsync(id)}
-                  onPost={(id) => openAudioPost(id)}
-                />
-              ))}
-            </ol>
+            {audioGeneroFilter === "todos" && generoChunks.length > 1 ? (
+              <>
+                {generoChunks.map(({ g, items }) => (
+                  <div key={g} className="mt-3">
+                    <div className="flex items-center gap-2">
+                      <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-[#C13584]">
+                        <Disc3 className="size-3.5" />
+                        {g}
+                      </h3>
+                      <span className="text-[10px] text-muted-foreground">
+                        {items.length} música{items.length === 1 ? "" : "s"}
+                      </span>
+                      <span className="h-px flex-1 bg-border" />
+                    </div>
+                    <ol className="mt-1 divide-y divide-border">
+                      {items.map((a, i) => (
+                        <AudioRankRow
+                          key={a.id}
+                          a={a}
+                          rank={i + 1}
+                          onPreview={(id) => audioPreview.mutateAsync(id)}
+                          onPost={(id) => openAudioPost(id)}
+                        />
+                      ))}
+                    </ol>
+                  </div>
+                ))}
+              </>
+            ) : (
+              <ol className="mt-1 divide-y divide-border">
+                {viewedAudios.map((a, i) => (
+                  <AudioRankRow
+                    key={a.id}
+                    a={a}
+                    rank={i + 1}
+                    onPreview={(id) => audioPreview.mutateAsync(id)}
+                    onPost={(id) => openAudioPost(id)}
+                  />
+                ))}
+              </ol>
+            )}
           </div>
         ) : (
           <>

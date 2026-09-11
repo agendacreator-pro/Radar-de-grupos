@@ -128,6 +128,7 @@ export type InstaAudio = {
   id: string;
   nome: string;
   artista: string | null;
+  genero?: string | null;
   usos: number | null;
   crescimento: number;
   ciclo: InstaCiclo;
