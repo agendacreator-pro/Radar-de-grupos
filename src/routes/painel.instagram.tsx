@@ -798,6 +798,7 @@ function RadarInstagramPage() {
   const [audioView, setAudioView] = useState<"ranking" | "cards">("ranking");
   const [audioStatusFilter, setAudioStatusFilter] = useState<"todos" | InstaAudioStatus>("todos");
   const [audioGeneroFilter, setAudioGeneroFilter] = useState<string>("todos");
+  const [audioGroupMode, setAudioGroupMode] = useState<"geral" | "estilos">("geral");
   const [contentDialog, setContentDialog] = useState(false);
   const [content, setContent] = useState<InstaContent | null>(null);
   const [planDialog, setPlanDialog] = useState(false);
@@ -1503,6 +1504,38 @@ function RadarInstagramPage() {
                   Cards
                 </button>
               </span>
+              {audioView === "ranking" && audioGeneroFilter === "todos" && (
+                <span className="ml-1 inline-flex overflow-hidden rounded-md border border-border">
+                  <button
+                    type="button"
+                    onClick={() => setAudioGroupMode("geral")}
+                    className={cn(
+                      "px-2.5 py-1 text-xs font-medium",
+                      audioGroupMode === "geral"
+                        ? "bg-[#E1306C]/10 text-[#C13584]"
+                        : "bg-background text-muted-foreground hover:bg-muted",
+                    )}
+                    title="Ranking geral: todas as músicas juntas, em ordem de Trend Score"
+                  >
+                    <ListMusic className="mr-1 inline size-3" />
+                    Geral
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAudioGroupMode("estilos")}
+                    className={cn(
+                      "px-2.5 py-1 text-xs font-medium",
+                      audioGroupMode === "estilos"
+                        ? "bg-[#E1306C]/10 text-[#C13584]"
+                        : "bg-background text-muted-foreground hover:bg-muted",
+                    )}
+                    title="Separar o ranking por estilo musical (cada estilo com sua lista)"
+                  >
+                    <Disc3 className="mr-1 inline size-3" />
+                    Por Estilo
+                  </button>
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -1521,12 +1554,19 @@ function RadarInstagramPage() {
               </p>
               <span className="text-[11px] text-muted-foreground">
                 parada oficial (Apple Music/Deezer Brasil), ordenado pelo Trend Score (1º = mais
-                forte) e separado por estilo musical em alta. Clique em “Ouvir” para reproduzir a
-                prévia oficial. O Instagram não expõe “áudio em alta” publicamente — o dado real é a
-                parada que alimenta os Reels.
+                forte).
+                {audioGeneroFilter === "todos" && audioGroupMode === "geral"
+                  ? "Ranking geral: todas as músicas juntas em uma única lista."
+                  : audioGeneroFilter === "todos" && audioGroupMode === "estilos"
+                    ? "Separado por estilo musical — cada estilo com sua própria lista em alta."
+                    : "Mostrando apenas as músicas desse estilo."}
+                Clique em “Ouvir” para reproduzir a prévia oficial. O Instagram não expõe “áudio em
+                alta” publicamente — o dado real é a parada que alimenta os Reels.
               </span>
             </div>
-            {audioGeneroFilter === "todos" && generoChunks.length > 1 ? (
+            {audioGeneroFilter === "todos" &&
+            audioGroupMode === "estilos" &&
+            generoChunks.length > 1 ? (
               <>
                 {generoChunks.map(({ g, items }) => (
                   <div key={g} className="mt-3">
