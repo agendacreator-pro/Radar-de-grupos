@@ -574,6 +574,7 @@ function toAudioRow(a: InstaAudio): Record<string, unknown> {
     track_name: a.track_name ?? null,
     artist_name: a.artist_name ?? null,
     enrich_attempted_at: a.enrich_attempted_at ?? null,
+    provider: a.provider ?? null,
   };
 }
 
@@ -589,6 +590,7 @@ type ItunesMatch = {
   previewUrl: string | null;
   artworkUrl: string | null;
   itunesUrl: string | null;
+  provider: "itunes" | "deezer";
 };
 
 function normStr(s: unknown): string {
@@ -658,7 +660,73 @@ function toItunesMatch(pick: any): ItunesMatch {
       ? String(pick.artworkUrl100).replace("100x100bb", "300x300bb")
       : null,
     itunesUrl: pick?.trackViewUrl ? String(pick.trackViewUrl) : null,
+    provider: "itunes",
   };
+}
+
+async function deezerSearch(query: string): Promise<any[]> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ITUNES_TIMEOUT_MS);
+  try {
+    const res = await fetch(
+      `https://api.deezer.com/search?q=${encodeURIComponent(query)}&limit=8`,
+      { headers: { Accept: "application/json" }, signal: ctrl.signal },
+    );
+    if (!res.ok) return [];
+    const json: any = await res.json();
+    return Array.isArray(json?.data) ? json.data : [];
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function toDeezerMatch(pick: any): ItunesMatch {
+  return {
+    trackName: String(pick?.title ?? "").trim() || null,
+    artistName: String(pick?.artist?.name ?? "").trim() || null,
+    previewUrl: pick?.preview ? String(pick.preview) : null,
+    artworkUrl: pick?.album?.cover_xl
+      ? String(pick.album.cover_xl)
+      : pick?.album?.cover_medium
+        ? String(pick.album.cover_medium)
+        : null,
+    itunesUrl: pick?.link ? String(pick.link) : null,
+    provider: "deezer",
+  };
+}
+
+async function pickDeezer(variants: string[], q: string): Promise<ItunesMatch | null> {
+  const all: any[] = [];
+  const seen = new Set<number>();
+  for (const v of variants) {
+    for (const r of await deezerSearch(v)) {
+      if (r.id != null && seen.has(r.id)) continue;
+      if (r.id != null) seen.add(r.id);
+      all.push(r);
+    }
+  }
+  if (all.length === 0) return null;
+  const scored = all.map((r: any) => {
+    let s = 0;
+    const t = normStr(r.title);
+    const a = normStr(r.artist?.name);
+    if (t && q.includes(t)) s += 4;
+    else if (t && t.includes(q)) s += 2;
+    if (a && q.includes(a)) s += 2;
+    if (r.preview) s += 2;
+    if (r.position != null && r.position <= 3) s += 1;
+    return { r, s };
+  });
+  scored.sort((x: any, y: any) => y.s - x.s);
+  let best = scored[0]?.r;
+  if (best && !best.preview) {
+    const p = all.find((r) => r.preview);
+    if (p) best = p;
+  }
+  if (!best?.preview) return null;
+  return toDeezerMatch(best);
 }
 
 async function resolveItunesAudio(
@@ -667,6 +735,16 @@ async function resolveItunesAudio(
 ): Promise<ItunesMatch | null> {
   const variants = searchTermVariants(nome, artista);
   if (variants.length === 0) return null;
+  const qRef =
+    extractQuotedTitle(nome) ??
+    (searchTermVariants(nome, null)[0] || titutoLimpo(nome)).slice(0, 60);
+  const q = normStr(qRef.replace(/\([^)]*\)/g, ""));
+  const picker = await pickItunesPicker(variants, q);
+  if (picker) return picker;
+  return pickDeezer(variants, q);
+}
+
+async function pickItunesPicker(variants: string[], q: string): Promise<ItunesMatch | null> {
   const all: any[] = [];
   const seen = new Set<number>();
   let i = 0;
@@ -681,10 +759,6 @@ async function resolveItunesAudio(
     i++;
   }
   if (all.length === 0) return null;
-  const qRef =
-    extractQuotedTitle(nome) ??
-    (searchTermVariants(nome, null)[0] || titutoLimpo(nome)).slice(0, 60);
-  const q = normStr(qRef.replace(/\([^)]*\)/g, ""));
   const scored = all.map((r: any) => {
     let s = (r.__instaWeight ?? 0) * 10;
     const t = normStr(r.trackName);
@@ -701,8 +775,22 @@ async function resolveItunesAudio(
     const p = all.find((r) => r.previewUrl);
     if (p) best = p;
   }
-  if (!best) return null;
+  if (!best?.previewUrl) return null;
   return toItunesMatch(best);
+}
+
+// Busca no navegador (ou worker): usa variantes + iTunes (CORS liberado) e Deezer.
+export async function clientResolveAudio(
+  nome: string,
+  artista?: string | null,
+): Promise<ItunesMatch | null> {
+  const variants = searchTermVariants(nome, artista);
+  if (variants.length === 0) return null;
+  const qRef = extractQuotedTitle(nome) ?? (variants[0] || titutoLimpo(nome)).slice(0, 60);
+  const q = normStr(qRef.replace(/\([^)]*\)/g, ""));
+  const picked = await pickItunesPicker(variants, q);
+  if (picked?.previewUrl) return picked;
+  return pickDeezer(variants, q);
 }
 
 // ============================================================
@@ -903,6 +991,7 @@ async function runAnalysis(
             a.itunes_url = m.itunesUrl;
             a.track_name = m.trackName;
             a.artist_name = m.artistName;
+            a.provider = m.provider;
           }
           a.enrich_attempted_at = new Date().toISOString();
         } catch {
@@ -1740,6 +1829,7 @@ export const instaRadarAudioPost = createServerFn({ method: "POST" })
           track_name: r.track_name ?? null,
           artist_name: r.artist_name ?? null,
           enrich_attempted_at: r.enrich_attempted_at ?? null,
+          provider: r.provider ?? null,
         };
         return { success: true, data: buildAudioPost(audio, config.keywords) };
       } catch (err) {
@@ -1782,6 +1872,7 @@ export const instaRadarAudioPreview = createServerFn({ method: "POST" })
           upd["itunes_url"] = m.itunesUrl;
           upd["track_name"] = m.trackName;
           upd["artist_name"] = m.artistName;
+          upd["provider"] = m.provider;
         }
         await admin.from("insta_radar_audios").update(upd).eq("id", data.id).eq("user_id", userId);
         return {
@@ -1828,6 +1919,7 @@ export const instaRadarAudioResolve = createServerFn({ method: "POST" })
           upd["itunes_url"] = m.itunesUrl;
           upd["track_name"] = m.trackName;
           upd["artist_name"] = m.artistName;
+          upd["provider"] = m.provider;
           upd["nome"] = term;
           if (artista) upd["artista"] = artista;
         }
@@ -1836,6 +1928,56 @@ export const instaRadarAudioResolve = createServerFn({ method: "POST" })
       } catch (err) {
         console.error("[insta-radar] audio resolve:", err);
         return { success: false, error: "Falha ao buscar a faixa agora. Tente em instantes." };
+      }
+    },
+  );
+
+export const instaRadarAudioClientResolve = createServerFn({ method: "POST" })
+  .validator(
+    (d: {
+      token: string;
+      id: string;
+      term?: string;
+      artista?: string;
+      preview_url?: string | null;
+      artwork_url?: string | null;
+      itunes_url?: string | null;
+      track_name?: string | null;
+      artist_name?: string | null;
+      provider?: string | null;
+    }) => d,
+  )
+  .handler(
+    async ({ data }): Promise<{ success: boolean; error?: string; audio?: InstaAudio | null }> => {
+      const userId = await verifyUser(data.token);
+      if (!userId) return { success: false, error: "Sessão expirada. Entre novamente." };
+      try {
+        const admin: any = await getAdmin();
+        const { data: row } = await admin
+          .from("insta_radar_audios")
+          .select("*")
+          .eq("id", data.id)
+          .eq("user_id", userId)
+          .single();
+        if (!row) return { success: false, error: "Áudio não encontrado." };
+        const upd: Record<string, unknown> = { enrich_attempted_at: new Date().toISOString() };
+        if (data.term !== undefined && data.term !== null && String(data.term).trim()) {
+          upd["preview_url"] = data.preview_url ?? null;
+          upd["artwork_url"] = data.artwork_url ?? null;
+          upd["itunes_url"] = data.itunes_url ?? null;
+          upd["track_name"] = data.track_name ?? null;
+          upd["artist_name"] = data.artist_name ?? null;
+          upd["provider"] = (data.provider ?? null) as string | null;
+          upd["nome"] = String(data.term).trim();
+          if (data.artista !== undefined && String(data.artista).trim()) {
+            upd["artista"] = String(data.artista).trim();
+          }
+        }
+        await admin.from("insta_radar_audios").update(upd).eq("id", data.id).eq("user_id", userId);
+        return { success: true, audio: { ...(row as InstaAudio), ...upd } };
+      } catch (err) {
+        console.error("[insta-radar] audio client resolve:", err);
+        return { success: false, error: "Falha ao vincular a prévia. Tente em instantes." };
       }
     },
   );

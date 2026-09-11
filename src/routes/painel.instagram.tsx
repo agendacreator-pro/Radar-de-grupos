@@ -69,6 +69,7 @@ import {
   useInstaAlertsMark,
   useInstaPlanDelete,
   useInstaPlanSave,
+  useInstaRadarAudioClientResolve,
   useInstaRadarAudioPost,
   useInstaRadarAudioPreview,
   useInstaRadarAudioResolve,
@@ -78,6 +79,7 @@ import {
   useInstaSaveKeywords,
   useInstagramRadar,
 } from "@/hooks/useInstagramRadar";
+import { clientResolveAudio } from "@/lib/instagram-radar-engine";
 
 export const Route = createFileRoute("/painel/instagram")({
   head: () => ({
@@ -366,12 +368,49 @@ function AudioCard({
   const [editOpen, setEditOpen] = useState(false);
   const [term, setTerm] = useState(a.nome ?? "");
   const [art, setArt] = useState(a.artista ?? "");
+  const [clientAudio, setClientAudio] = useState<InstaAudio | null>(null);
   const resolve = useInstaRadarAudioResolve();
+  const clientResolve = useInstaRadarAudioClientResolve();
 
-  const cur = resolve.data ?? a;
+  const cur = clientAudio ?? resolve.data ?? a;
   const nomeReels = (cur.track_name && cur.track_name.trim()) || cur.nome;
   const artistLabel = (cur.artist_name && cur.artist_name.trim()) || cur.artista;
   const preview = cur.preview_url;
+  const provider = (cur.provider ?? "itunes") as "itunes" | "deezer";
+  const providerLabel = provider === "deezer" ? "Deezer" : "Apple Music";
+
+  async function resolveInBrowser(termIn: string, artIn: string) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const m = await clientResolveAudio(termIn, artIn);
+      if (m?.previewUrl) {
+        const attached = await clientResolve.mutateAsync({
+          id: a.id,
+          term: m.trackName || termIn,
+          artista: m.artistName || artIn,
+          preview_url: m.previewUrl,
+          artwork_url: m.artworkUrl,
+          itunes_url: m.itunesUrl,
+          track_name: m.trackName,
+          artist_name: m.artistName,
+          provider: m.provider,
+        });
+        if (attached) setClientAudio(attached);
+        setPlay(true);
+        setNotice(null);
+      } else {
+        setNotice(
+          "Nenhuma prévia encontrada no navegador — confira a grafia do nome/artista e tente de novo.",
+        );
+        setEditOpen(true);
+      }
+    } catch {
+      setNotice("Não consegui buscar a prévia no navegador agora. Tente em instantes.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function handlePlay() {
     if (preview) {
@@ -465,7 +504,7 @@ function AudioCard({
                 title={
                   preview
                     ? "Reproduzir a prévia oficial (30s)"
-                    : "Buscar a faixa real no iTunes e reproduzir a prévia"
+                    : "Buscar a faixa real (iTunes/Deezer) no navegador e reproduzir a prévia"
                 }
               >
                 {busy ? (
@@ -533,23 +572,16 @@ function AudioCard({
                   <Button
                     size="sm"
                     className="w-full"
-                    disabled={resolve.isPending || !term.trim()}
-                    onClick={() =>
-                      void resolve.mutateAsync({ id: a.id, term: term.trim(), artista: art.trim() })
-                    }
+                    disabled={busy || !term.trim()}
+                    onClick={() => void resolveInBrowser(term.trim(), art.trim())}
                   >
-                    {resolve.isPending ? (
+                    {busy ? (
                       <Loader2 className="size-3 animate-spin" />
                     ) : (
                       <Search className="size-3" />
                     )}
                     Buscar faixa real
                   </Button>
-                  {resolve.isError && (
-                    <p className="text-[11px] text-red-600">
-                      {resolve.error?.message ?? "Falha ao buscar agora."}
-                    </p>
-                  )}
                 </div>
               )}
             </div>
@@ -584,8 +616,13 @@ function AudioCard({
               rel="noopener noreferrer"
               className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-background px-3 text-muted-foreground hover:border-[#E1306C]/50 hover:text-[#E1306C]"
             >
-              <ExternalLink className="size-3.5" /> Apple Music
+              <ExternalLink className="size-3.5" /> {providerLabel}
             </a>
+          )}
+          {cur.provider === "deezer" && (
+            <span className="inline-flex h-6 items-center gap-1 rounded bg-[#E1306C]/5 px-2 text-[10px] font-medium text-muted-foreground">
+              🎵 prévia via Deezer
+            </span>
           )}
           <a
             href={ytSearch}

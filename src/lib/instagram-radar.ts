@@ -118,6 +118,7 @@ export type InstaAudio = {
   track_name?: string | null;
   artist_name?: string | null;
   enrich_attempted_at?: string | null;
+  provider?: string | null;
 };
 
 export type InstaAlertTipo =

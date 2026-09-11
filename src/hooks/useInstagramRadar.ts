@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
   instaRadarAlertsMark,
+  instaRadarAudioClientResolve,
   instaRadarAudioPost,
   instaRadarAudioPreview,
   instaRadarAudioResolve,
@@ -147,6 +148,31 @@ export function useInstaRadarAudioResolve() {
       const token = await getToken();
       const res = await instaRadarAudioResolve({ data: { token, ...input } });
       if (!res.success) throw new Error(res.error ?? "Falha ao buscar a faixa");
+      return res.audio ?? null;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["instagram-radar"] });
+    },
+  });
+}
+
+export function useInstaRadarAudioClientResolve() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      id: string;
+      term?: string;
+      artista?: string;
+      preview_url?: string | null;
+      artwork_url?: string | null;
+      itunes_url?: string | null;
+      track_name?: string | null;
+      artist_name?: string | null;
+      provider?: string | null;
+    }): Promise<InstaAudio | null> => {
+      const token = await getToken();
+      const res = await instaRadarAudioClientResolve({ data: { token, ...input } });
+      if (!res.success) throw new Error(res.error ?? "Falha ao vincular a prévia");
       return res.audio ?? null;
     },
     onSuccess: () => {
