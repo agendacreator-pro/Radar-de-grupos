@@ -7,12 +7,16 @@ import {
   Calendar,
   Check,
   CheckCircle2,
+  ChevronRight,
   Copy,
   Disc3,
   ExternalLink,
   Flame,
   Info,
   Instagram,
+  LayoutGrid,
+  LayoutTemplate,
+  Lightbulb,
   ListMusic,
   Loader2,
   MessageSquare,
@@ -26,6 +30,8 @@ import {
   Trash2,
   TrendingUp,
   Trophy,
+  Users,
+  Video,
   Volume2,
   Wand2,
 } from "lucide-react";
@@ -69,6 +75,17 @@ import {
   type InstaPlan,
   type InstaTrend,
 } from "@/lib/instagram-radar";
+import {
+  INSTA_FORMATO_PERIODOS,
+  INSTA_FORMATO_STATUS_CLASSES,
+  INSTA_FORMATO_STATUS_LABELS,
+  analyzeFormatos,
+  trendEmPeriodo,
+  trendMencionaNicho,
+  type InstaFormatoPeriodo,
+  type InstaFormatoResult,
+  type InstaFormatoStatus,
+} from "@/lib/instagram-formatos";
 import {
   useInstaAlertsMark,
   useInstaPlanDelete,
@@ -229,6 +246,197 @@ function TrendCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function FormatoIcon({ formato, className }: { formato: string; className?: string }) {
+  const f = formato.toLowerCase();
+  if (f.includes("carrossel")) return <LayoutGrid className={className} />;
+  if (f.includes("colab")) return <Users className={className} />;
+  if (f.includes("story") || f.includes("reels") || f.includes("video") || f.includes("feed"))
+    return <Video className={className} />;
+  return <LayoutTemplate className={className} />;
+}
+
+function FormatoCard({
+  r,
+  showRank,
+  onVerAnalise,
+}: {
+  r: InstaFormatoResult;
+  showRank: boolean;
+  onVerAnalise: () => void;
+}) {
+  const pctAlta = Math.round(r.shareEmAlta * 100);
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            {showRank && (
+              <span
+                className={cn(
+                  "grid size-7 shrink-0 place-items-center rounded-full text-xs font-bold text-white",
+                  r.rank === 1
+                    ? "bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF]"
+                    : "bg-slate-300",
+                )}
+                title={`${r.rank}º no ranking de formatos`}
+              >
+                {r.rank}
+              </span>
+            )}
+            <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#E1306C]/10 text-[#C13584]">
+              <FormatoIcon formato={r.formato} className="size-4" />
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold text-foreground">{r.formato}</p>
+              <Badge variant="outline" className={INSTA_FORMATO_STATUS_CLASSES[r.status]}>
+                {INSTA_FORMATO_STATUS_LABELS[r.status]}
+              </Badge>
+            </div>
+          </div>
+          <span className="text-right">
+            <span className="block text-lg font-bold leading-none">
+              {r.score}
+              <span className="text-[10px] font-normal text-muted-foreground">/100</span>
+            </span>
+            <span className="block text-[10px] text-muted-foreground">Format Score</span>
+          </span>
+        </div>
+
+        <dl className="mt-3 grid grid-cols-2 gap-1.5 text-xs sm:grid-cols-4">
+          <div className="rounded-lg bg-muted px-2 py-1.5">
+            <dt className="text-[10px] text-muted-foreground">Tendências</dt>
+            <dd className="font-semibold text-foreground">{r.count}</dd>
+          </div>
+          <div className="rounded-lg bg-muted px-2 py-1.5">
+            <dt className="text-[10px] text-muted-foreground">Em alta</dt>
+            <dd className="font-semibold text-foreground">{pctAlta}%</dd>
+          </div>
+          <div className="rounded-lg bg-muted px-2 py-1.5">
+            <dt className="text-[10px] text-muted-foreground">Compat nicho</dt>
+            <dd className="font-semibold text-foreground">{r.compatMedio}%</dd>
+          </div>
+          <div className="rounded-lg bg-muted px-2 py-1.5">
+            <dt className="text-[10px] text-muted-foreground">Score médio</dt>
+            <dd className="font-semibold text-foreground">{r.scoreMedio}</dd>
+          </div>
+        </dl>
+
+        {r.top.length > 0 && (
+          <div className="mt-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Principais sinais
+            </p>
+            <ul className="mt-1 space-y-0.5 text-[11px] text-muted-foreground">
+              {r.top.slice(0, 3).map((t) => (
+                <li key={t.id} className="flex items-start gap-1">
+                  <span className="mt-1 size-1 shrink-0 rounded-full bg-[#E1306C]" />
+                  <span className="break-words">{t.nome}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <Button size="sm" variant="outline" className="mt-3 w-full" onClick={onVerAnalise}>
+          Ver análise <ChevronRight className="size-3.5" />
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function FormatoDialog({
+  open,
+  result,
+  onOpenChange,
+  onTransform,
+  onAgendar,
+}: {
+  open: boolean;
+  result: InstaFormatoResult | null;
+  onOpenChange: (open: boolean) => void;
+  onTransform: (t: InstaTrend) => void;
+  onAgendar: (t: InstaTrend) => void;
+}) {
+  if (!result) return null;
+  const pctAlta = Math.round(result.shareEmAlta * 100);
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[86vh] max-w-2xl overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <span className="grid size-9 place-items-center rounded-lg bg-[#E1306C]/10 text-[#C13584]">
+              <FormatoIcon formato={result.formato} className="size-5" />
+            </span>
+            {result.formato}
+            <Badge variant="outline" className={INSTA_FORMATO_STATUS_CLASSES[result.status]}>
+              {INSTA_FORMATO_STATUS_LABELS[result.status]}
+            </Badge>
+          </DialogTitle>
+          <DialogDescription>
+            {result.rank}º no ranking de formatos · Format Score estimado a partir dos sinais que o
+            Radar coletou (score, ciclo, crescimento e compat das {result.trends.length} tendências
+            deste formato) — não é métrica oficial do Instagram.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="rounded-lg bg-muted px-2 py-1.5">
+            <span className="block text-[10px] text-muted-foreground">Format Score</span>
+            <span className="text-sm font-bold text-foreground">
+              {result.score}
+              <span className="text-[10px] font-normal text-muted-foreground">/100</span>
+            </span>
+          </div>
+          <div className="rounded-lg bg-muted px-2 py-1.5">
+            <span className="block text-[10px] text-muted-foreground">Tendências</span>
+            <span className="text-sm font-bold text-foreground">{result.count}</span>
+          </div>
+          <div className="rounded-lg bg-muted px-2 py-1.5">
+            <span className="block text-[10px] text-muted-foreground">Em alta</span>
+            <span className="text-sm font-bold text-foreground">{pctAlta}%</span>
+          </div>
+          <div className="rounded-lg bg-muted px-2 py-1.5">
+            <span className="block text-[10px] text-muted-foreground">Compat média</span>
+            <span className="text-sm font-bold text-foreground">{result.compatMedio}%</span>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-[#DD2A7B]/25 bg-[#E1306C]/5 p-3 text-xs text-foreground">
+          <p className="font-semibold text-[#C13584]">O que sustenta este resultado</p>
+          <ul className="mt-1 list-inside list-disc space-y-0.5">
+            <li>
+              {pctAlta}% das tendências do formato estão em auge/crescendo ({result.countEmAlta} de{" "}
+              {result.count}: {result.countAuge} auge, {result.countCrescendo} crescendo).
+            </li>
+            {result.countCaindo > 0 && <li>{result.countCaindo} já em queda/saturação.</li>}
+            <li>
+              Score médio das tendências: {result.scoreMedio}, com compat média de{" "}
+              {result.compatMedio}% com o nicho.
+            </li>
+            {result.crescimentoMedio > 0 && (
+              <li>
+                Crescimento médio registrado: {result.crescimentoMedio} (estimativa do Radar).
+              </li>
+            )}
+          </ul>
+        </div>
+
+        {result.trends.length > 0 && (
+          <div>
+            <p className="text-sm font-bold text-foreground">Principais tendências deste formato</p>
+            <div className="mt-2 space-y-3">
+              {result.trends.map((t) => (
+                <TrendCard key={t.id} t={t} onTransform={onTransform} onAgendar={onAgendar} />
+              ))}
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -812,8 +1020,13 @@ function RadarInstagramPage() {
     objetivo: "Engajamento",
   });
   const [confirmWipe, setConfirmWipe] = useState(false);
+  const [formatoNicho, setFormatoNicho] = useState<string>("todos");
+  const [formatoPeriodo, setFormatoPeriodo] = useState<InstaFormatoPeriodo>("todos");
+  const [formatoDialog, setFormatoDialog] = useState(false);
+  const [formatoSel, setFormatoSel] = useState<InstaFormatoResult | null>(null);
   const alertsRef = useRef<HTMLDivElement>(null);
   const trendsRef = useRef<HTMLDivElement>(null);
+  const formatosRef = useRef<HTMLDivElement>(null);
   const audiosRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -883,6 +1096,47 @@ function RadarInstagramPage() {
     return m;
   }, [audios]);
   const hasSemEstilo = (generoNamedCounts.get("Outros estilos") ?? 0) > 0;
+
+  // Formatos em alta — camada de análise sobre as tendências já coletadas.
+  // Nenhuma busca nova; tudo deriva de trends (score/ciclo/crescimento/compat/formato).
+  const formatoPeriodoTrends = useMemo(
+    () => trends.filter((t) => trendEmPeriodo(t, formatoPeriodo)),
+    [trends, formatoPeriodo],
+  );
+  const formatoKeywordCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const k of config?.keywords ?? [])
+      m.set(k, formatoPeriodoTrends.filter((t) => trendMencionaNicho(t, k)).length);
+    return m;
+  }, [formatoPeriodoTrends, config]);
+  const formatoTrends = useMemo(() => {
+    let base = formatoPeriodoTrends;
+    if (formatoNicho !== "todos") base = base.filter((t) => trendMencionaNicho(t, formatoNicho));
+    return base;
+  }, [formatoPeriodoTrends, formatoNicho]);
+  const formatoAnalise = useMemo(() => analyzeFormatos(formatoTrends), [formatoTrends]);
+
+  function clearFormatoFilters() {
+    setFormatoNicho("todos");
+    setFormatoPeriodo("todos");
+  }
+
+  function openFormatoDialog(r: InstaFormatoResult) {
+    setFormatoSel(r);
+    setFormatoDialog(true);
+  }
+
+  function transformFromFormato(t: InstaTrend) {
+    setFormatoDialog(false);
+    setFormatoSel(null);
+    void openContent(t);
+  }
+
+  function agendarFromFormato(t: InstaTrend) {
+    setFormatoDialog(false);
+    setFormatoSel(null);
+    openPlanForTrend(t);
+  }
 
   function applyStatFilter(f: StatFilter, scrollTo: "trends" | "audios" | "alerts") {
     setStatFilter(f === statFilter ? null : f);
@@ -1310,6 +1564,18 @@ function RadarInstagramPage() {
         onAgendar={openPlanFromContent}
       />
 
+      {/* Formatos em alta — modal de análise do formato */}
+      <FormatoDialog
+        open={formatoDialog}
+        result={formatoSel}
+        onOpenChange={(open) => {
+          setFormatoDialog(open);
+          if (!open) setFormatoSel(null);
+        }}
+        onTransform={transformFromFormato}
+        onAgendar={agendarFromFormato}
+      />
+
       {/* Tendências */}
       <section ref={trendsRef} className="mt-8 scroll-mt-24">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1382,6 +1648,149 @@ function RadarInstagramPage() {
                 t={t}
                 onTransform={(tr) => void openContent(tr)}
                 onAgendar={openPlanForTrend}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Formatos em alta — análise sobre as tendências já coletadas */}
+      <section ref={formatosRef} className="mt-8 scroll-mt-24">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
+            <Flame className="size-5 text-[#E1306C]" />
+            Formatos em alta
+            {formatoAnalise.results.length > 0 && (
+              <span className="text-sm font-normal text-muted-foreground">
+                ({formatoAnalise.results.length} formato
+                {formatoAnalise.results.length > 1 ? "s" : ""} de {formatoAnalise.total} tendências)
+              </span>
+            )}
+          </h2>
+          {trends.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs font-semibold text-muted-foreground">Período:</span>
+              {INSTA_FORMATO_PERIODOS.map((p) => (
+                <button
+                  key={p.key}
+                  type="button"
+                  onClick={() => setFormatoPeriodo(formatoPeriodo === p.key ? "todos" : p.key)}
+                  className={cn(
+                    "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
+                    formatoPeriodo === p.key
+                      ? "border-transparent bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white"
+                      : "border-border bg-background text-muted-foreground hover:border-[#E1306C]/50",
+                  )}
+                >
+                  {p.label}
+                </button>
+              ))}
+              {(config?.keywords.length ?? 0) > 0 && (
+                <>
+                  <span className="ml-1 text-xs font-semibold text-muted-foreground">Nicho:</span>
+                  <button
+                    type="button"
+                    onClick={() => setFormatoNicho("todos")}
+                    className={cn(
+                      "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
+                      formatoNicho === "todos"
+                        ? "border-transparent bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white"
+                        : "border-border bg-background text-muted-foreground hover:border-[#E1306C]/50",
+                    )}
+                  >
+                    Todos ({formatoPeriodoTrends.length})
+                  </button>
+                  {config!.keywords.map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => setFormatoNicho(formatoNicho === k ? "todos" : k)}
+                      className={cn(
+                        "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
+                        formatoNicho === k
+                          ? "border-transparent bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white"
+                          : "border-border bg-background text-muted-foreground hover:border-[#E1306C]/50",
+                      )}
+                    >
+                      {k} ({formatoKeywordCounts.get(k) ?? 0})
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={clearFormatoFilters}
+                    title="Limpar filtros de formato"
+                    className="rounded-full border border-[#DD2A7B]/40 bg-[#E1306C]/10 px-2.5 py-0.5 text-xs font-medium text-[#C13584] transition-colors hover:bg-[#E1306C]/20"
+                  >
+                    Limpar ×
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          Camada de análise sobre as tendências que o Radar já coletou — nenhuma busca nova é
+          executada. Score e ciclo são <em>estimativas do Radar</em> a partir de sinais públicos
+          (busca web); o Instagram não expõe métrica oficial equivalente.
+        </p>
+
+        {formatoAnalise.insights.length > 0 && (
+          <div className="mt-3 rounded-xl border border-[#DD2A7B]/25 bg-[#E1306C]/5 px-3 py-2 text-xs text-foreground">
+            <p className="flex items-center gap-1.5 font-semibold text-[#C13584]">
+              <Lightbulb className="size-3.5" /> Insight do Radar
+            </p>
+            <ul className="mt-1 list-inside list-disc space-y-0.5">
+              {formatoAnalise.insights.map((s) => (
+                <li key={s}>{s}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {formatoAnalise.results.length === 0 ? (
+          <Card className="mt-3">
+            <CardContent className="grid place-items-center gap-2 p-8 text-center">
+              <LayoutTemplate className="size-6 text-muted-foreground" />
+              <p className="text-sm font-medium text-foreground">Nenhum formato identificado</p>
+              <p className="max-w-md text-xs text-muted-foreground">
+                {trends.length > 0
+                  ? "Nenhuma tendência do recorte atual (filtros de nicho/período) possui formato marcado — ou nenhuma tendência menciona o termo escolhido no texto observado pelo Radar. Rode novas varreduras ou ajuste os filtros."
+                  : "Sem tendências ainda. Rode o radar para coletar tendências (elas gravam o formato quando mencionado)."}
+              </p>
+            </CardContent>
+          </Card>
+        ) : !formatoAnalise.suficiente ? (
+          <>
+            <Card className="mt-3">
+              <CardContent className="grid gap-1 p-6 text-center">
+                <p className="text-base font-bold text-foreground">Dados insuficientes</p>
+                <p className="mx-auto max-w-md text-xs text-muted-foreground">
+                  Continue analisando tendências para que o Radar consiga identificar os formatos
+                  com maior força. Mostrando abaixo os formatos identificados até agora,{" "}
+                  <strong>sem ranking</strong> — ainda há poucas tendências para ordená-los com
+                  confiança.
+                </p>
+              </CardContent>
+            </Card>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {formatoAnalise.results.map((r) => (
+                <FormatoCard
+                  key={r.formato}
+                  r={r}
+                  showRank={false}
+                  onVerAnalise={() => openFormatoDialog(r)}
+                />
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {formatoAnalise.results.map((r) => (
+              <FormatoCard
+                key={r.formato}
+                r={r}
+                showRank
+                onVerAnalise={() => openFormatoDialog(r)}
               />
             ))}
           </div>
