@@ -65,6 +65,10 @@ import {
   INSTA_FONTE_LABELS,
   INSTA_FORMATS,
   INSTA_GANCHOS,
+  INSTA_NICHE_CONFIDENCE_LABELS,
+  INSTA_SIGNAL_QUALITY_CLASSES,
+  INSTA_SIGNAL_QUALITY_LABELS,
+  INSTA_TREND_SOURCE_LABELS,
   formatHora,
   scoreLabel,
   type InstaAlert,
@@ -73,6 +77,7 @@ import {
   type InstaCiclo,
   type InstaContent,
   type InstaPlan,
+  type InstaSignalQuality,
   type InstaTrend,
 } from "@/lib/instagram-radar";
 import {
@@ -185,6 +190,23 @@ function TrendCard({
               <Badge className={INSTA_CICLO_CLASSES[t.ciclo]}>{INSTA_CICLO_LABELS[t.ciclo]}</Badge>
               <Badge variant="outline">{INSTA_CATEGORIA_LABELS[t.categoria]}</Badge>
               <FonteBadge fonte={t.fonte} detalhe={t.fonte_detalhe} />
+              {t.signal_quality && (
+                <Badge
+                  variant="outline"
+                  className={INSTA_SIGNAL_QUALITY_CLASSES[t.signal_quality]}
+                  title={`Sinais reais disponíveis: ${INSTA_SIGNAL_QUALITY_LABELS[t.signal_quality]}`}
+                >
+                  sinal {INSTA_SIGNAL_QUALITY_LABELS[t.signal_quality].toLowerCase()}
+                </Badge>
+              )}
+              {t.niche && t.niche_confidence && t.niche_confidence !== "unknown" && (
+                <Badge
+                  variant="outline"
+                  title={`Nicho resolvido na coleta: ${INSTA_NICHE_CONFIDENCE_LABELS[t.niche_confidence]}`}
+                >
+                  🎯 {t.niche}
+                </Badge>
+              )}
             </div>
             <p className="mt-1.5 break-words text-sm font-semibold text-foreground">{t.nome}</p>
           </div>
@@ -206,7 +228,12 @@ function TrendCard({
             ) : (
               <span className="text-[11px]">crescimento: dado não disponível</span>
             )}
-            {t.formato && <span>┊ formato: {t.formato}</span>}
+            {t.formato && (
+              <span>
+                ┊ formato: {t.formato}
+                {t.subformato ? ` · ${t.subformato}` : ""}
+              </span>
+            )}
           </div>
           {t.motivo && (
             <p className="flex items-start gap-1 text-[11px]">
@@ -324,6 +351,54 @@ function FormatoCard({
           </div>
         </dl>
 
+        {r.subformatos.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              variações:
+            </span>
+            {r.subformatos.slice(0, 4).map((s) => (
+              <span
+                key={s.subformato ?? "base"}
+                className="rounded-full border border-border bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                title={s.subformato ? `Tendências de ${s.subformato}` : "Sem variação identificada"}
+              >
+                {s.subformato ?? "sem variação"} × {s.count}
+              </span>
+            ))}
+            <span className="ml-1 text-[10px] text-muted-foreground">
+              🎯 nicho resolvido {r.nichoResolvido}/{r.count}
+            </span>
+          </div>
+        )}
+
+        <div className="mt-2 flex flex-wrap items-center gap-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            sinal:
+          </span>
+          {(Object.keys(INSTA_SIGNAL_QUALITY_LABELS) as InstaSignalQuality[])
+            .filter((q) => (r.qualidade[q] ?? 0) > 0)
+            .map((q) => (
+              <span
+                key={q}
+                className={cn(
+                  "rounded-full border px-1.5 py-0.5 text-[10px]",
+                  INSTA_SIGNAL_QUALITY_CLASSES[q],
+                )}
+              >
+                {INSTA_SIGNAL_QUALITY_LABELS[q]} {r.qualidade[q]}
+              </span>
+            ))}
+        </div>
+
+        {r.dataInicio && (
+          <p
+            className="mt-1.5 text-[10px] text-muted-foreground"
+            title="Janela real de coleta (primeira à última vez vista pelo Radar nesta base)"
+          >
+            coletadas de {formatHora(r.dataInicio)} a {formatHora(r.dataFim)}
+          </p>
+        )}
+
         {r.top.length > 0 && (
           <div className="mt-3">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -402,6 +477,50 @@ function FormatoDialog({
           <div className="rounded-lg bg-muted px-2 py-1.5">
             <span className="block text-[10px] text-muted-foreground">Compat média</span>
             <span className="text-sm font-bold text-foreground">{result.compatMedio}%</span>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-border bg-muted/40 p-3 text-xs text-foreground">
+          <p className="font-semibold text-muted-foreground">Qualidade desta base</p>
+          <div className="mt-1.5 space-y-1">
+            {result.subformatos.length > 0 && (
+              <p>
+                Variações:{" "}
+                {result.subformatos
+                  .map((s) => `${s.subformato ?? "sem variação"} (${s.count})`)
+                  .join(" · ")}
+                .
+              </p>
+            )}
+            <p>
+              Sinal observado:{" "}
+              {(Object.keys(INSTA_SIGNAL_QUALITY_LABELS) as InstaSignalQuality[])
+                .filter((q) => (result.qualidade[q] ?? 0) > 0)
+                .map((q) => `${INSTA_SIGNAL_QUALITY_LABELS[q]} ${result.qualidade[q]}`)
+                .join(" · ") || "sem classificação"}
+              .
+            </p>
+            <p>
+              Nicho resolvido: {result.nichoResolvido} de {result.count} tendências (vínculo com a
+              palavra-chave confirmado no texto observado).
+            </p>
+            {result.dataInicio && (
+              <p className="text-[11px] text-muted-foreground">
+                Janela de coleta (primeira → última vez vista): {formatHora(result.dataInicio)} a{" "}
+                {formatHora(result.dataFim)}.
+              </p>
+            )}
+            {result.comHistorico === 0 ? (
+              <p className="text-[11px] text-muted-foreground">
+                Nenhuma tendência deste grupo foi vista em execuções separadas — ainda não há
+                variação no tempo para medir.
+              </p>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">
+                {result.comHistorico} tendência{result.comHistorico > 1 ? "s" : ""} vista em mais de
+                uma execução.
+              </p>
+            )}
           </div>
         </div>
 
@@ -1114,7 +1233,10 @@ function RadarInstagramPage() {
     if (formatoNicho !== "todos") base = base.filter((t) => trendMencionaNicho(t, formatoNicho));
     return base;
   }, [formatoPeriodoTrends, formatoNicho]);
-  const formatoAnalise = useMemo(() => analyzeFormatos(formatoTrends), [formatoTrends]);
+  const formatoAnalise = useMemo(
+    () => analyzeFormatos(formatoTrends, config?.keywords ?? []),
+    [formatoTrends, config],
+  );
 
   function clearFormatoFilters() {
     setFormatoNicho("todos");
@@ -1731,7 +1853,9 @@ function RadarInstagramPage() {
         <p className="mt-2 text-[11px] text-muted-foreground">
           Camada de análise sobre as tendências que o Radar já coletou — nenhuma busca nova é
           executada. Score e ciclo são <em>estimativas do Radar</em> a partir de sinais públicos
-          (busca web); o Instagram não expõe métrica oficial equivalente.
+          (busca web); o Instagram não expõe métrica oficial equivalente. Os filtros de período usam
+          quando o Radar viu a tendência pela <strong>primeira vez</strong> (o que nunca é
+          sobrescrito), não a data da última execução.
         </p>
 
         {formatoAnalise.insights.length > 0 && (

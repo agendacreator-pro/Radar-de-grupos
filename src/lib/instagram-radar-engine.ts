@@ -25,6 +25,13 @@ import {
   type InstaPlan,
   type InstaTrend,
 } from "@/lib/instagram-radar";
+import {
+  buildTrendSnapshot,
+  calculateSignalQuality,
+  deriveTrendSource,
+  normalizeTrendFormat,
+  resolveTrendNiche,
+} from "@/lib/instagram-quality";
 
 // ============================================================
 // Radar do Algoritmo — Instagram (mecanismo, roda no Worker)
@@ -540,6 +547,14 @@ async function loadConfig(userId: string): Promise<InstaConfig> {
   };
 }
 
+function minTimestamp(...vals: (string | null | undefined)[]): string | null {
+  const ok = (vals ?? []).filter(
+    (v): v is string => typeof v === "string" && !Number.isNaN(new Date(v).getTime()),
+  );
+  if (ok.length === 0) return null;
+  return ok.reduce((m, v) => (v < m ? v : m), ok[0]!);
+}
+
 function toTrendRow(t: InstaTrend): Record<string, unknown> {
   return {
     nome: t.nome,
@@ -551,10 +566,18 @@ function toTrendRow(t: InstaTrend): Record<string, unknown> {
     motivo: t.motivo,
     adaptacao: t.adaptacao,
     formato: t.formato,
+    subformato: t.subformato ?? null,
+    niche: t.niche ?? null,
+    niche_confidence: t.niche_confidence ?? null,
+    source: t.source ?? null,
+    signal_quality: t.signal_quality ?? null,
     fonte: t.fonte,
     fonte_detalhe: t.fonte_detalhe,
     url: t.url,
     coletado_em: t.coletado_em,
+    first_seen_at: t.first_seen_at ?? null,
+    last_seen_at: t.last_seen_at ?? null,
+    seen_count: t.seen_count ?? null,
   };
 }
 
@@ -1153,10 +1176,13 @@ async function runAnalysis(
   // Nomes já conhecidos (para diferenciar "nova" de "já vista" e gerar alertas)
   const { data: prevTrends } = await admin
     .from("insta_radar_trends")
-    .select("nome,ciclo")
+    .select("nome,ciclo,coletado_em,created_at,first_seen_at,last_seen_at,seen_count")
     .eq("user_id", userId);
   const prevByName = new Map<string, InstaCiclo>(
     (prevTrends ?? []).map((r: any) => [String(r.nome).toLowerCase(), r.ciclo as InstaCiclo]),
+  );
+  const prevTrendRowMap = new Map<string, any>(
+    (prevTrends ?? []).map((r: any) => [String(r.nome).toLowerCase(), r]),
   );
   const { data: prevAudios } = await admin
     .from("insta_radar_audios")
@@ -1221,6 +1247,22 @@ async function runAnalysis(
       const crescimento = clampScore(s.viral * 14 + Math.max(0, s.growth) * 7 + s.novelty * 5);
       const fonte = obs.url ? "observado" : "estimativa";
       const wasKnown = prevByName.has(nome.toLowerCase());
+      // ── Qualidade da base: formato normalizado, nicho, origem e timestamps reais ──
+      const formatoRes = normalizeTrendFormat(inferFormat(texto, categoria));
+      const motivo = buildMotivo(obs.title, s, compat, obs.provider, obs.published);
+      const nichoRes = resolveTrendNiche({ nome, motivo, extra: texto }, keywords);
+      const source = deriveTrendSource({ url: obs.url, provider: obs.provider });
+      const prevRow = prevTrendRowMap.get(nome.toLowerCase());
+      // coletado_em NUNCA é sobrescrito nas re-colletas (era a causa de todas as
+      // tendências parecerem "das últimas 24h"): preserva o primeiro instante.
+      const coletadoEm = (minTimestamp(
+        prevRow?.coletado_em,
+        prevRow?.created_at,
+        obs.published ?? now,
+      ) ??
+        obs.published ??
+        now) as string;
+      const firstSeenAt = (prevRow?.first_seen_at ?? prevRow?.created_at ?? coletadoEm) as string;
       trendsByNome.set(nome, {
         id: "",
         nome,
@@ -1229,15 +1271,29 @@ async function runAnalysis(
         score,
         compat,
         crescimento,
-        motivo: buildMotivo(obs.title, s, compat, obs.provider, obs.published),
+        motivo,
         adaptacao: deriveAdaptacao(nome, ciclo, compat, keywords),
-        formato: inferFormat(texto, categoria),
+        formato: formatoRes.formato,
+        subformato: formatoRes.subformato,
+        niche: nichoRes.niche,
+        niche_confidence: nichoRes.confidence,
+        source,
+        signal_quality: calculateSignalQuality({
+          url: obs.url,
+          published: obs.published,
+          provider: obs.provider,
+          text: texto,
+          fonte,
+        }),
         fonte,
         fonte_detalhe: obs.url
           ? `Página observada (${obs.provider}). ${wasKnown ? "Já constava em radar anterior." : "Nova no radar."}`
           : "Sem URL confiável — estimativa a partir do trecho encontrado.",
         url: obs.url,
-        coletado_em: obs.published ?? now,
+        coletado_em: coletadoEm,
+        first_seen_at: firstSeenAt,
+        last_seen_at: now,
+        seen_count: prevRow?.seen_count != null ? Number(prevRow.seen_count) + 1 : 1,
       });
     } else {
       // Áudio
@@ -1493,6 +1549,9 @@ async function runAnalysis(
       crescimento: a.crescimento,
       rank: a.rank ?? 0,
     })),
+    // Snapshot das tendências do período: base para análises futuras/filtros
+    // honestos (primeira coleta nunca é sobrescrita; variação só entre coletas).
+    trends: trends.slice(0, 40).map((t) => buildTrendSnapshot(t, keywords)),
   };
 
   return { trends, audios, alerts, resumo, chart_used: chart.used };

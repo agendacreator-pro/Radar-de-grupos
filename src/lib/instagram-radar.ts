@@ -22,6 +22,66 @@ export type InstaCategoria =
 
 export type InstaFonte = "oficial" | "observado" | "estimativa" | "inferencia";
 
+// ── Qualidade da base (etapa "qualidade dos sinais") ──
+
+/**
+ * Grau de certeza do vínculo tendência ↔ nicho (keyword do usuário).
+ * - high   → a keyword aparece no TÍTULO observado (evidência mais forte)
+ * - medium → a keyword aparece no snippet/motivo observado
+ * - low    → só uma palavra de uma keyword composta apareceu (parcial)
+ * - unknown → nenhuma keyword foi encontrada no texto observado
+ */
+export type InstaNicheConfidence = "high" | "medium" | "low" | "unknown";
+
+/** Qualidade dos sinais reais disponíveis para uma tendência. */
+export type InstaSignalQuality = "alta" | "media" | "baixa" | "insuficiente";
+
+/** Origem de ONDE veio o dado (coleta), distinto de `fonte` (legitimidade da métrica). */
+export type InstaTrendSource = "web_search" | "engine" | "manual" | "other" | "unknown";
+
+/** Formato já normalizado: base canônica + variação (subformato). */
+export type InstaFormatoNormalizado = {
+  formato: string | null;
+  subformato: string | null;
+  raw: string | null;
+};
+
+export const INSTA_NICHE_CONFIDENCE_LABELS: Record<InstaNicheConfidence, string> = {
+  high: "No título",
+  medium: "Nos sinais",
+  low: "Parcial",
+  unknown: "Não identificado",
+};
+
+export const INSTA_NICHE_CONFIDENCE_CLASSES: Record<InstaNicheConfidence, string> = {
+  high: "border-emerald-300 bg-emerald-50 text-emerald-700",
+  medium: "border-sky-300 bg-sky-50 text-sky-700",
+  low: "border-slate-300 bg-slate-100 text-slate-600",
+  unknown: "border-slate-300 bg-slate-100 text-slate-500",
+};
+
+export const INSTA_SIGNAL_QUALITY_LABELS: Record<InstaSignalQuality, string> = {
+  alta: "Alta",
+  media: "Média",
+  baixa: "Baixa",
+  insuficiente: "Insuficiente",
+};
+
+export const INSTA_SIGNAL_QUALITY_CLASSES: Record<InstaSignalQuality, string> = {
+  alta: "border-emerald-300 bg-emerald-50 text-emerald-700",
+  media: "border-amber-300 bg-amber-50 text-amber-800",
+  baixa: "border-orange-300 bg-orange-50 text-orange-800",
+  insuficiente: "border-slate-300 bg-slate-100 text-slate-500",
+};
+
+export const INSTA_TREND_SOURCE_LABELS: Record<InstaTrendSource, string> = {
+  web_search: "Busca pública (web)",
+  engine: "Derivado pelo Radar",
+  manual: "Adicionado manualmente",
+  other: "Outra origem",
+  unknown: "Origem não identificada",
+};
+
 export const INSTA_CICLO_LABELS: Record<InstaCiclo, string> = {
   surgindo: "🆕 Surgindo",
   crescendo: "📈 Crescendo",
@@ -96,6 +156,22 @@ export type InstaTrend = {
   fonte_detalhe: string | null;
   url: string | null;
   coletado_em: string;
+  // ── Qualidade da base (etapa atual) ──
+  /** Variação do formato (ex.: "Áudio" dentro de "Reels"). */
+  subformato?: string | null;
+  /** Keyword do nicho que o texto observado melhor confirma (resolvida na coleta). */
+  niche?: string | null;
+  niche_confidence?: InstaNicheConfidence | null;
+  /** Onde o dado foi obtido (busca pública web / derivado pelo Radar). */
+  source?: InstaTrendSource | null;
+  /** Qualidade dos sinais reais disponíveis. */
+  signal_quality?: InstaSignalQuality | null;
+  /** Primeiro instante em que o Radar viu a tendência (nunca sobrescrito). */
+  first_seen_at?: string | null;
+  /** Último instante em que o Radar viu a tendência. */
+  last_seen_at?: string | null;
+  seen_count?: number | null;
+  created_at?: string | null;
 };
 
 export type InstaAudioStatus = "viral" | "crescendo" | "nova" | "consolidada" | "perdendo";
@@ -224,6 +300,30 @@ export type InstaAudioSnapshot = {
   rank: number;
 };
 
+/**
+ * Snapshot histórico de UMA tendência, gravado a cada execução para que
+ * análises futuras possam comparar entre coletas sem inventar variação.
+ * `coletado_em`/`first_seen_at`/`last_seen_at` são timestamps REAIS.
+ */
+export type InstaTrendSnapshot = {
+  key: string;
+  nome: string;
+  categoria: InstaCategoria;
+  ciclo: InstaCiclo;
+  score: number;
+  compat: number;
+  crescimento: number;
+  formato: string | null;
+  subformato: string | null;
+  nicho: string | null;
+  nichoConfidence: InstaNicheConfidence | null;
+  source: InstaTrendSource | null;
+  signalQuality: InstaSignalQuality | null;
+  coletadoEm: string;
+  primeiraColetaEm: string;
+  ultimaColetaEm: string;
+};
+
 export type InstaHistory = {
   id: string;
   resumo: {
@@ -236,6 +336,7 @@ export type InstaHistory = {
     fonte?: string;
     duracao?: number;
     audios?: InstaAudioSnapshot[];
+    trends?: InstaTrendSnapshot[];
   };
   criado_em: string;
 };

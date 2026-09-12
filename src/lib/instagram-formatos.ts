@@ -15,15 +15,26 @@
 // (score/ciclo/crescimento são estimativas do próprio Radar).
 // ============================================================
 
-import { INSTA_FORMATS, type InstaTrend } from "@/lib/instagram-radar";
+import {
+  INSTA_FORMATS,
+  type InstaTrend,
+  type InstaSignalQuality,
+  type InstaNicheConfidence,
+} from "@/lib/instagram-radar";
+import {
+  calculateSignalQuality,
+  normalizeTrendFormat,
+  normPhrase,
+  resolveTrendNiche,
+} from "@/lib/instagram-quality";
 
 export type InstaFormatoPeriodo = "todos" | "24h" | "7d" | "30d";
 
 export const INSTA_FORMATO_PERIODOS: { key: InstaFormatoPeriodo; label: string }[] = [
   { key: "todos", label: "Todo o período" },
-  { key: "24h", label: "Últimas 24 horas" },
-  { key: "7d", label: "Últimos 7 dias" },
-  { key: "30d", label: "Últimos 30 dias" },
+  { key: "24h", label: "Surgidas nas últimas 24 h" },
+  { key: "7d", label: "Surgidas nos últimos 7 dias" },
+  { key: "30d", label: "Surgidas nos últimos 30 dias" },
 ];
 
 export type InstaFormatoStatus = "alta" | "crescendo" | "estavel" | "perdendo";
@@ -42,9 +53,9 @@ export const INSTA_FORMATO_STATUS_CLASSES: Record<InstaFormatoStatus, string> = 
   perdendo: "border-red-300 bg-red-50 text-red-700",
 };
 
-/** Resultado agregado de UM formato (um grupo de tendências com trends.formato = X). */
+/** Resultado agregado de UM formato (as tendências cujo formato NORMALIZADO é X). */
 export type InstaFormatoResult = {
-  /** Nome exato do formato como está gravado nas tendências (ex.: "Reels"). */
+  /** Nome canônico do formato (ex.: "Reels"). "Reels (áudio)" entra no grupo "Reels". */
   formato: string;
   /** Posição no ranking (1 = maior Format Score). */
   rank: number;
@@ -68,6 +79,21 @@ export type InstaFormatoResult = {
   status: InstaFormatoStatus;
   /** Top 3 tendências por score (para os "principais sinais"). */
   top: InstaTrend[];
+  // ── Qualidade da base ──
+  /** Frequência dos subformatos dentro do formato (ex.: Áudio 3 · sem variação 13). */
+  subformatos: { subformato: string | null; count: number }[];
+  /** Subformato mais frequente (null se não houver variação). */
+  subformatoDominante: string | null;
+  /** Tendências do grupo por qualidade de sinal. */
+  qualidade: Partial<Record<InstaSignalQuality, number>>;
+  /** Primeiro instante de coleta entre as tendências do grupo (first_seen). */
+  dataInicio: string | null;
+  /** Último instante de coleta entre as tendências do grupo (last_seen). */
+  dataFim: string | null;
+  /** Tendências com histórico REAL entre execuções (last_seen ≠ first_seen). */
+  comHistorico: number;
+  /** Tendências com nicho resolvido (não "unknown"). */
+  nichoResolvido: number;
 };
 
 export type InstaFormatoAnalise = {
@@ -76,36 +102,64 @@ export type InstaFormatoAnalise = {
   total: number;
   results: InstaFormatoResult[];
   insights: string[];
+  /** true quando os sinais observados são poucos — os números são estimativas pontuais. */
+  dadosLimitados: boolean;
+  /** true quando nenhum formato tem histórico entre execuções — crescimento não é medido no tempo. */
+  semHistorico: boolean;
 };
 
 const DIAS_MS = 86_400_000;
 
 /**
- * Filtro por nicho: mantém apenas tendências cujo texto OBSERVADO (nome +
- * motivo: sinais reais que o Radar registrou) menciona a palavra-chave.
- * Espelha o mesmo critério que o Radar usa em computeCompat — é o único
- * vínculo tendência↔nicho que os dados expõem (as tendências não gravam qual
- * keyword acertou).
- *
- * IMPORTANTE: NÃO inclui `adaptacao` no texto de busca. `adaptacao` é texto
- * gerado pelo engine que repete automaticamente as 2 primeiras keywords —
- * incluí-lo tornaria o filtro artificial (quase tudo bateria). Aqui só vale
- * o que foi realmente observado na coleta.
+ * Nicho EFETIVO de uma tendência: prefere o nicho resolvido na COLEÇÃO
+ * (campo `niche` + `niche_confidence` — usa título + snippet, evidência
+ * mais forte); para linhas antigas sem nicho gravado, re-resolve agora
+ * usando apenas o texto observado (nome + motivo). Nunca usa `adaptacao`.
  */
-export function trendMencionaNicho(t: InstaTrend, keyword: string): boolean {
-  const k = keyword.toLowerCase();
-  return ` ${t.nome} ${t.motivo ?? ""} `.toLowerCase().includes(k);
+export function trendNichoEfetivo(
+  t: InstaTrend,
+  keywords: string[],
+): { niche: string | null; confidence: InstaNicheConfidence } {
+  if (t.niche && t.niche_confidence && t.niche_confidence !== "unknown")
+    return { niche: t.niche, confidence: t.niche_confidence };
+  return resolveTrendNiche({ nome: t.nome, motivo: t.motivo }, keywords ?? []);
 }
 
 /**
- * Filtro por período usando o instante em que a tendência foi coletada
- * (coletado_em, que corresponde à data de publicação observada ou à data da
- * coleta). Honesto: é uma janela sobre a coleta do Radar, não sobre métricas
- * oficiais do Instagram.
+ * Uma tendência pertence a uma keyword quando:
+ *   - seu nicho GRAVADO na coleta é essa keyword (evidência forte do título/
+ *     snippet observados), ou
+ *   - (linhas antigas) a keyword aparecer como palavra inteira no texto
+ *     observado nome + motivo.
+ *
+ * Espelha o mesmo critério que o Radar usa em computeCompat — é o único
+ * vínculo tendência↔nicho que os dados expõem. IMPORTANTE: NÃO inclui
+ * `adaptacao` (texto gerado que repete as 2 primeiras keywords em toda
+ * linha — tornaria o filtro artificial).
+ */
+export function trendMencionaNicho(t: InstaTrend, keyword: string): boolean {
+  const target = normPhrase(keyword);
+  if (!target) return false;
+  if (t.niche && t.niche_confidence && t.niche_confidence !== "unknown")
+    return normPhrase(t.niche) === target;
+  const r = resolveTrendNiche({ nome: t.nome, motivo: t.motivo }, [keyword]);
+  return r.niche !== null && r.confidence !== "unknown";
+}
+
+/**
+ * Filtro por período usando o instante em que a tendência SURGIU no radar
+ * (first_seen_at, que nunca é sobrescrito). Para linhas antigas sem
+ * first_seen_at, cai em created_at (real) e só então em coletado_em.
+ *
+ * Isso corrige a janela que antes usava coletado_em — campo que o upsert
+ * reescrevia a cada execução, fazendo TUDAS as tendências parecerem
+ * "das últimas 24h". Honesto: é uma janela sobre a coleta do Radar, não
+ * sobre métricas oficiais do Instagram.
  */
 export function trendEmPeriodo(t: InstaTrend, periodo: InstaFormatoPeriodo): boolean {
   if (periodo === "todos") return true;
-  const d = new Date(t.coletado_em);
+  const ref = t.first_seen_at ?? t.created_at ?? t.coletado_em;
+  const d = new Date(ref);
   if (Number.isNaN(d.getTime())) return false;
   const days = (Date.now() - d.getTime()) / DIAS_MS;
   if (periodo === "24h") return days <= 1;
@@ -119,16 +173,20 @@ function avg(nums: number[]): number {
 }
 
 /**
- * Agrupa as tendências existentes por trends.formato.
- * Somente os formatos QUE EXISTEM nos dados viram grupos — nada é criado
- * ou preenchido com valor fixo. Tendências sem formato (null) são ignoradas
- * (o card de tendência já informa "formato não identificado").
+ * Agrupa as tendências existentes pelo formato NORMALIZADO (base canônica):
+ * "Reels (áudio)" e "Reels" caem no mesmo grupo "Reels" — o subformato fica
+ * na coluna separada. Somente formatos QUE EXISTEM nos dados viram grupos —
+ * nada é criado ou preenchido com valor fixo. Tendências sem formato (null)
+ * são ignoradas (o card de tendência já informa "formato não identificado").
  */
 export function groupTrendsByFormato(trends: InstaTrend[]): Map<string, InstaTrend[]> {
   const groups = new Map<string, InstaTrend[]>();
   for (const t of trends) {
-    if (!t.formato) continue;
-    groups.set(t.formato, [...(groups.get(t.formato) ?? []), t]);
+    const { formato } = normalizeTrendFormat(t.formato);
+    if (!formato) continue;
+    const list = groups.get(formato) ?? [];
+    list.push(t);
+    groups.set(formato, list);
   }
   return groups;
 }
@@ -180,10 +238,27 @@ export function deriveFormatoStatus(shareEmAlta: number, shareCaindo: number): I
 }
 
 /**
+ * Qualidade de sinal de uma tendência: usa o valor resolvido na coleta
+ * (`signal_quality`); para linhas antigas, mede de novo com os campos que
+ * existem (link observado, texto, fonte). Nunca inventa sinal.
+ */
+export function signalQualityOf(t: InstaTrend): InstaSignalQuality {
+  return (
+    t.signal_quality ??
+    calculateSignalQuality({
+      url: t.url,
+      fonte: t.fonte,
+      text: `${t.nome} ${t.motivo ?? ""}`,
+    })
+  );
+}
+
+/**
  * Analisa as tendências e devolve o ranking de formatos + insights.
  * Consome APENAS os dados já coletados (sem buscas novas, sem chamadas duplicadas).
+ * `keywords` serve para medir nicho resolvido de linhas antigas (opcional).
  */
-export function analyzeFormatos(trends: InstaTrend[]): InstaFormatoAnalise {
+export function analyzeFormatos(trends: InstaTrend[], keywords?: string[]): InstaFormatoAnalise {
   const total = trends.length;
   // Suficiente: precisa de tendências de verdade em mais de um formato.
   const suficiente = total >= 5;
@@ -204,6 +279,38 @@ export function analyzeFormatos(trends: InstaTrend[]): InstaFormatoAnalise {
     const shareCaindo = count === 0 ? 0 : countCaindo / count;
     const score = computeFormatoScore(scoreMedio, shareEmAlta, crescimentoMedio, compatMedio);
 
+    // Qualidade da base
+    const subformatos = new Map<string | null, number>();
+    let comHistorico = 0;
+    let nichoResolvido = 0;
+    let dataInicio: string | null = null;
+    let dataFim: string | null = null;
+    const qualidade: Partial<Record<InstaSignalQuality, number>> = {};
+
+    for (const item of items) {
+      const { subformato } = normalizeTrendFormat(item.formato);
+      const key = subformato ?? null;
+      subformatos.set(key, (subformatos.get(key) ?? 0) + 1);
+
+      const fe = item.first_seen_at ?? item.created_at ?? item.coletado_em;
+      const le = item.last_seen_at ?? item.coletado_em;
+      if (fe && (!dataInicio || fe < dataInicio)) dataInicio = fe;
+      if (le && (!dataFim || le > dataFim)) dataFim = le;
+      const feAbs = fe ? new Date(fe).getTime() : null;
+      const leAbs = le ? new Date(le).getTime() : null;
+      if (feAbs != null && leAbs != null && leAbs !== feAbs) comHistorico++;
+
+      const nichoE = trendNichoEfetivo(item, keywords ?? []);
+      if (nichoE.niche && nichoE.confidence !== "unknown") nichoResolvido++;
+
+      const q = signalQualityOf(item);
+      qualidade[q] = (qualidade[q] ?? 0) + 1;
+    }
+
+    const subformatosSorted = [...subformatos.entries()]
+      .map(([subformato, c]) => ({ subformato, count: c }))
+      .sort((a, b) => b.count - a.count);
+
     resultados.push({
       formato,
       rank: 0,
@@ -220,6 +327,13 @@ export function analyzeFormatos(trends: InstaTrend[]): InstaFormatoAnalise {
       score,
       status: deriveFormatoStatus(shareEmAlta, shareCaindo),
       top: [...items].sort((a, b) => b.score - a.score).slice(0, 3),
+      subformatos: subformatosSorted,
+      subformatoDominante: subformatosSorted[0]?.subformato ?? null,
+      qualidade,
+      dataInicio,
+      dataFim,
+      comHistorico,
+      nichoResolvido,
     });
   }
 
@@ -231,12 +345,31 @@ export function analyzeFormatos(trends: InstaTrend[]): InstaFormatoAnalise {
   });
   resultados.forEach((r, i) => (r.rank = i + 1));
 
+  const dadosLimitados = !suficiente || fracaoSinaisFracos(resultados, total) > 0.5;
+  const semHistorico =
+    total > 0 && resultados.length > 0 && resultados.every((r) => r.comHistorico === 0);
+
   return {
     suficiente,
     total,
     results: resultados,
-    insights: buildFormatoInsights(resultados, suficiente, total),
+    insights: buildFormatoInsights(resultados, suficiente, total, dadosLimitados, semHistorico),
+    dadosLimitados,
+    semHistorico,
   };
+}
+
+/**
+ * Fração (0-1) de tendências com qualidade de sinal baixa/insuficiente
+ * (pouca evidência observada) em relação ao total analisado.
+ */
+function fracaoSinaisFracos(results: InstaFormatoResult[], total: number): number {
+  if (total <= 0) return 0;
+  let fracos = 0;
+  for (const r of results) {
+    fracos += (r.qualidade["baixa"] ?? 0) + (r.qualidade["insuficiente"] ?? 0);
+  }
+  return fracos / total;
 }
 
 /**
@@ -247,11 +380,15 @@ export function analyzeFormatos(trends: InstaTrend[]): InstaFormatoAnalise {
  *   - formato com maior concentração → sua fração do total
  *   - formato com maior proporção de auge/crescendo (com 2+ tendências) → %
  *   - líder do Format Score → pontuação
+ *   - dados limitados (pouca evidência observada) → aviso honesto
+ *   - sem histórico entre execuções → aviso de que crescimento é pontual
  */
 function buildFormatoInsights(
   results: InstaFormatoResult[],
   suficiente: boolean,
   total: number,
+  dadosLimitados: boolean,
+  semHistorico: boolean,
 ): string[] {
   if (!suficiente || results.length < 1) {
     return ["Não há dados suficientes para gerar um insight confiável."];
@@ -286,6 +423,18 @@ function buildFormatoInsights(
   if (lines.length === 1 && lider.count >= 2) {
     lines.push(
       `${lider.formato} lidera o Format Score (${lider.score}) entre ${results.length} formatos analisados.`,
+    );
+  }
+
+  if (dadosLimitados) {
+    lines.push(
+      "Esta base tem poucos sinais observados por tendência — os números acima são estimativas pontuais do Radar, não métricas oficiais do Instagram.",
+    );
+  }
+
+  if (semHistorico) {
+    lines.push(
+      "Ainda não há histórico entre execuções do Radar para medir crescimento real por formato — o 'crescimento' aparece como estimativa pontual.",
     );
   }
 
