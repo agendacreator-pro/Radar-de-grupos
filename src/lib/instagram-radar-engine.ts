@@ -605,6 +605,7 @@ type ItunesMatch = {
   trackName: string | null;
   artistName: string | null;
   album: string | null;
+  genre: string | null;
   previewUrl: string | null;
   artworkUrl: string | null;
   itunesUrl: string | null;
@@ -675,6 +676,10 @@ function toItunesMatch(pick: any): ItunesMatch {
     trackName: String(pick?.trackName ?? "").trim() || null,
     artistName: String(pick?.artistName ?? "").trim() || null,
     album: String(pick?.collectionName ?? "").trim() || null,
+    genre:
+      String(pick?.primaryGenreName ?? "").trim() ||
+      String(Array.isArray(pick?.genres) ? pick.genres[0] : "").trim() ||
+      null,
     previewUrl: pick?.previewUrl ? String(pick.previewUrl) : null,
     artworkUrl: pick?.artworkUrl100
       ? String(pick.artworkUrl100).replace("100x100bb", "300x300bb")
@@ -708,6 +713,7 @@ function toDeezerMatch(pick: any): ItunesMatch {
     trackName: String(pick?.title ?? "").trim() || null,
     artistName: String(pick?.artist?.name ?? "").trim() || null,
     album: String(pick?.album?.title ?? "").trim() || null,
+    genre: null,
     previewUrl: pick?.preview ? String(pick.preview) : null,
     artworkUrl: pick?.album?.cover_xl
       ? String(pick.album.cover_xl)
@@ -748,14 +754,31 @@ async function fetchItunesTopSongs(country = "br"): Promise<ChartEntry[]> {
   try {
     const res = await fetch(
       `https://itunes.apple.com/${country}/rss/topsongs/limit=${CHART_LIMIT}/json`,
-      { headers: { Accept: "application/json" }, signal: ctrl.signal },
+      {
+        headers: {
+          Accept: "application/json",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
+        },
+        signal: ctrl.signal,
+      },
     );
     if (!res.ok) return [];
     const json: any = await res.json();
     const entries: any[] = Array.isArray(json?.feed?.entry) ? json.feed.entry : [];
     if (entries.length === 0) return [];
+    // O id do RSS é a URL completa (…?i=112233&uo=2). O lookup do iTunes só
+    // aceita o id numérico da faixa; extrair da URL é o que garante preview
+    // e estilo oficial (primaryGenreName) por item.
+    const trackIdFromUrl = (u: string): string | null => {
+      const q = String(u).match(/[?&]i=(\d+)/);
+      if (q) return q[1] ?? null;
+      const seg = String(u).match(/\/(?:album|single|track)\/[^/]+\/(\d+)(?:[?/#]|$)/);
+      if (seg) return seg[1] ?? null;
+      return null;
+    };
     const ids = entries
-      .map((e: any) => String(e?.id?.label ?? ""))
+      .map((e: any) => trackIdFromUrl(String(e?.id?.label ?? "")) ?? "")
       .filter((s: string) => s.length > 0);
     const lookupMap = new Map<string, any>();
     for (let i = 0; i < ids.length; i += 20) {
@@ -844,14 +867,58 @@ async function fetchDeezerChart(): Promise<ChartEntry[]> {
     if (!res.ok) return [];
     const json: any = await res.json();
     const data: any[] = Array.isArray(json?.data) ? json.data : [];
+    if (data.length === 0) return [];
+    // O chart de tracks do Deezer não expõe gênero por item, mas o álbum sim
+    // (api.deezer.com/album/{id} → genres.data[].name + genre_id). Resolve por
+    // álbum único (dedupe) e associa a cada faixa — fonte oficial de estilo.
+    const albumIds = Array.from(
+      new Set(
+        data
+          .map((t: any) => (t?.album?.id != null ? Number(t.album.id) : null))
+          .filter((v: unknown) => v != null) as number[],
+      ),
+    );
+    const albumGenres = new Map<number, string>();
+    for (let i = 0; i < albumIds.length; i += 6) {
+      const chunk = albumIds.slice(i, i + 6);
+      const results = await Promise.all(
+        chunk.map(async (aid: number) => {
+          try {
+            const ar = await fetch(`https://api.deezer.com/album/${aid}`, {
+              headers: { Accept: "application/json" },
+              signal: ctrl.signal,
+            });
+            if (!ar.ok) return null;
+            const aj: any = await ar.json();
+            const name =
+              String(
+                Array.isArray(aj?.genres?.data) ? (aj?.genres?.data[0]?.name ?? "") : "",
+              ).trim() ||
+              (aj?.genre_id != null ? (genreNameById.get(Number(aj.genre_id)) ?? "") : "");
+            return name ? { aid, name } : null;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      for (const r of results) {
+        if (r) {
+          albumGenres.set(r.aid, r.name);
+        }
+      }
+    }
     return data
       .map((t: any, i: number): ChartEntry => {
         const gid = t?.genre_id != null ? Number(t.genre_id) : null;
+        const aid = t?.album?.id != null ? Number(t.album.id) : null;
+        const genre =
+          (aid != null ? (albumGenres.get(aid) ?? null) : null) ??
+          (gid != null ? (genreNameById.get(gid) ?? null) : null);
         return {
           pos: i + 1,
           trackName: String(t?.title ?? "").trim(),
           artistName: String(t?.artist?.name ?? "").trim(),
-          genre: gid != null ? (genreNameById.get(gid) ?? null) : null,
+          genre,
           album: String(t?.album?.title ?? "").trim() || null,
           artworkUrl: t?.album?.cover_xl
             ? String(t.album.cover_xl)
@@ -1046,6 +1113,7 @@ function applyMatch(a: InstaAudio, m: ItunesMatch): InstaAudio {
   a.album = m.album;
   a.provider_id = m.providerId;
   a.provider = m.provider;
+  if (m.genre && !a.genero) a.genero = m.genre;
   if (m.artistName && !a.artista) a.artista = m.artistName;
   return a;
 }
@@ -1173,8 +1241,12 @@ async function runAnalysis(
       });
     } else {
       // Áudio
+      // Páginas de navegação do app (explorar/popular) entregam rótulos de UI,
+      // não faixas — ignorar para não inventar música a partir da interface.
+      if (obs.url && /instagram\.com\/(?:popular|explore)\//i.test(obs.url)) continue;
       const meta = extractAudioMeta(obs.title, obs.snippet);
       if (!meta) continue;
+      if (isJunkInstaAudio(meta.nome)) continue;
       const nome = meta.nome;
       const compat = computeCompat(obs.title, obs.snippet, keywords);
       const s = analyzeSignals(obs, compat);
@@ -1233,10 +1305,27 @@ async function runAnalysis(
   for (const ca of chart.audios) {
     const key = ca.nome.toLowerCase();
     const existing = audiosByNome.get(key);
-    if (existing && existing.preview_url && !ca.preview_url) {
-      audiosByNome.set(key, { ...existing, score: Math.max(existing.score, ca.score) });
-    } else if (existing && existing.score >= ca.score) {
-      audiosByNome.set(key, { ...existing, score: existing.score });
+    if (existing) {
+      // Junta o que é melhor de cada lado: preview oficial, estilo oficial e
+      // score mais alto (observado pode refinar, chart garante dado real).
+      const score = Math.max(existing.score, ca.score);
+      audiosByNome.set(key, {
+        ...existing,
+        ...ca,
+        score,
+        genero: ca.genero ?? existing.genero ?? null,
+        preview_url: ca.preview_url ?? existing.preview_url ?? null,
+        artwork_url: ca.artwork_url ?? existing.artwork_url ?? null,
+        itunes_url: ca.itunes_url ?? existing.itunes_url ?? null,
+        track_url: ca.track_url ?? existing.track_url ?? null,
+        track_name: ca.track_name ?? existing.track_name ?? null,
+        artist_name: ca.artist_name ?? existing.artist_name ?? null,
+        album: ca.album ?? existing.album ?? null,
+        provider_id: ca.provider_id ?? existing.provider_id ?? null,
+        provider: (ca.genero ? ca.provider : existing.provider) ?? null,
+        motivo: ca.motivo ?? existing.motivo ?? null,
+        fonte_detalhe: ca.fonte_detalhe ?? existing.fonte_detalhe ?? null,
+      });
     } else {
       audiosByNome.set(key, ca);
     }
@@ -1291,6 +1380,9 @@ async function runAnalysis(
   const rankMap = new Map<string, number>();
   audios.forEach((a, i) => rankMap.set(a.nome.toLowerCase(), i + 1));
   for (const a of audios) {
+    // Garante estilo para o ranking "Por Estilo": fonte oficial → vínculo
+    // (iTunes/Deezer via applyMatch) → classificador determinístico.
+    if (!a.genero) a.genero = inferAudioGenre(a.nome, a.artista, a.album);
     const key = a.nome.toLowerCase();
     const prevRow = prevAudioRowMap.get(key);
     const prevSnap = prevSnapshotMap.get(key);
@@ -1542,6 +1634,209 @@ function isAudioGeneric(s: string): boolean {
     .filter(Boolean);
   if (words.length === 0) return true;
   return words.every((w) => AUDIO_GENERIC_WORDS.has(w));
+}
+
+// Rótulos da interface de áudio do Instagram/scraping que aparecem como se
+// fossem "músicas" em resultados de busca ("Em destaque", "Explorar",
+// "Populares", "Usar áudio", "Hypado"…). Não são faixas reais — filtram
+// para o radar não inventar áudio/tendência a partir de UI do app.
+const INSTA_JUNK_AUDIO_EXACT = new Set([
+  "em destaque",
+  "destaque",
+  "explorar",
+  "populares",
+  "usar audio",
+  "usar áudio",
+  "hypado",
+  "new music",
+  "nova musica",
+  "novo som",
+  "novo queridinho",
+  "novoqueridinho",
+  "nova queridinha",
+  "para voce",
+  "para voce ainda",
+  "pra voce",
+  "pra você",
+  "para você",
+  "trending",
+  "energia",
+  "viral",
+  "em tendencia",
+  "em tendencia como ultimos trends",
+  "ultimos trends",
+  "mais usados",
+  "os mais usados",
+  "melhores",
+  "os melhores",
+  "tendencia",
+  "tendencias",
+  "templates musicasnoreels",
+  "musicasnoreels",
+  "s profile picture",
+  "s highlight story picture",
+  "inicio",
+  "ver todos",
+  "ver tudo",
+  "seguir",
+  "seguindo",
+  "curtir",
+]);
+
+function isJunkInstaAudio(nome: string): boolean {
+  const n = cleanAudioPart(nome ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\u{1F3B5}\u{1F3B6}]+/gu, "")
+    .trim();
+  if (n.length === 0) return true;
+  if (n.length < 3) return true;
+  if (INSTA_JUNK_AUDIO_EXACT.has(n) || INSTA_JUNK_AUDIO_EXACT.has(n.replace(/\s+/g, " ")))
+    return true;
+  if (isAudioGeneric(nome)) return true;
+  if (/\b(?:s\s+)?(?:profile picture|highlight story)\b/i.test(n)) return true;
+  if (/^o [eé] que j[aá] chegamos em\b/i.test(n)) return true;
+  if (/lancou$|lançou$|prestes a lancar|promete$|prometo$/i.test(n)) return true;
+  if (/^ah\s+mas\b|habla\s|na verdade\s/i.test(n)) return true;
+  // Trecho truncado de outra frase como se fosse título de faixa.
+  if (/^(o que|e como|como|por que|quais|quando|onde|vc|voc[êe])\s/i.test(n)) return true;
+  return false;
+}
+
+// Classificador determinístico de estilo musical (regras PT-BR) — só entra
+// quando a fonte oficial (iTunes/Deezer) não expôs o gênero, para nenhuma
+// faixa do radar ficar sem estilo no ranking "Por Estilo".
+function inferAudioGenre(
+  nome?: string | null,
+  artista?: string | null,
+  album?: string | null,
+): string | null {
+  const t = (nome ?? "")
+    .concat(" ", artista ?? "", " ", album ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const tags: Array<[string, string]> = [
+    ["galinha pintadinha", "Infantil"],
+    ["patati", "Infantil"],
+    ["turma da monica", "Infantil"],
+    ["musica infantil", "Infantil"],
+    ["parlenda", "Infantil"],
+    ["cantiga de roda", "Infantil"],
+    ["gospel", "Gospel"],
+    ["louvor", "Gospel"],
+    ["adoracao", "Gospel"],
+    ["adora", "Gospel"],
+    ["espirito santo", "Gospel"],
+    ["fe crista", "Gospel"],
+    ["jesus", "Gospel"],
+    ["deus", "Gospel"],
+    ["senhor", "Gospel"],
+    ["igreja", "Gospel"],
+    ["congregacao", "Gospel"],
+    ["sertanejo", "Sertanejo"],
+    ["sertaneja", "Sertanejo"],
+    ["moda de viola", "Sertanejo"],
+    ["modao", "Sertanejo"],
+    ["dupla sertaneja", "Sertanejo"],
+    ["universitario", "Sertanejo"],
+    ["sofrência", "Sertanejo"],
+    ["arrocha", "Arrocha"],
+    ["forro", "Forró"],
+    ["forró", "Forró"],
+    ["piseiro", "Forró"],
+    ["xote", "Forró"],
+    ["vaqueiro", "Forró"],
+    ["vaquejada", "Forró"],
+    ["sao joao", "Forró"],
+    ["arrombadinho", "Forró"],
+    ["cafona", "Brega"],
+    ["brega", "Brega"],
+    ["pagode", "Pagode"],
+    ["puxada", "Pagode"],
+    ["samba", "Samba/Pagode"],
+    ["sambista", "Samba/Pagode"],
+    ["partido alto", "Samba/Pagode"],
+    ["sambalanco", "Samba/Pagode"],
+    ["bossa", "MPB"],
+    ["mpb", "MPB"],
+    ["tropicalia", "MPB"],
+    ["clube da esquina", "MPB"],
+    ["samba cancao", "MPB"],
+    ["funk carioca", "Funk"],
+    ["baile funk", "Funk"],
+    ["funk", "Funk"],
+    ["funkeiro", "Funk"],
+    ["mc ", "Funk"],
+    ["mcw", "Funk"],
+    ["mtg", "Funk"],
+    ["batidao", "Funk"],
+    ["reggaeton", "Latina"],
+    ["bachata", "Latina"],
+    ["merengue", "Latina"],
+    ["cumbia", "Latina"],
+    ["espanhol", "Latina"],
+    ["latina", "Latina"],
+    ["rap", "Rap"],
+    ["hip hop", "Rap"],
+    ["hiphop", "Rap"],
+    ["freestyle", "Rap"],
+    ["drill", "Rap/Trap"],
+    ["trap", "Rap/Trap"],
+    ["breakbeat", "Eletrônica"],
+    ["brazilian bass", "Eletrônica"],
+    ["phonk", "Eletrônica"],
+    ["eletronica", "Eletrônica"],
+    ["eletronico", "Eletrônica"],
+    ["edm", "Eletrônica"],
+    ["house", "Eletrônica"],
+    ["techno", "Eletrônica"],
+    ["trance", "Eletrônica"],
+    ["remix", "Eletrônica"],
+    ["dj ", "Eletrônica"],
+    ["dubstep", "Eletrônica"],
+    ["reggae", "Reggae"],
+    ["ska", "Reggae"],
+    ["dub ", "Reggae"],
+    ["rasta", "Reggae"],
+    ["rock", "Rock"],
+    ["indie", "Indie/Rock"],
+    ["alternativo", "Indie/Rock"],
+    ["alternativa", "Indie/Rock"],
+    ["punk", "Rock"],
+    ["grunge", "Rock"],
+    ["metal", "Rock"],
+    ["hard rock", "Rock"],
+    ["blues", "Blues"],
+    ["folk", "Folk"],
+    ["acustico", "Acústico"],
+    ["acústico", "Acústico"],
+    ["violao", "Acústico"],
+    ["voz e violao", "Acústico"],
+    ["axe", "Axé"],
+    ["axé", "Axé"],
+    ["trio eletrico", "Axé"],
+    ["olodum", "Axé"],
+    ["ivete", "Axé"],
+    ["carnaval", "Axé/Folclore"],
+    ["bloco afro", "Axé/Folclore"],
+    ["bumba", "Axé/Folclore"],
+    ["lofi", "Lofi/Chill"],
+    ["lo-fi", "Lofi/Chill"],
+    ["chill", "Lofi/Chill"],
+    ["instrumental", "Instrumental"],
+    ["orquestra", "Erudita"],
+    ["classica", "Erudita"],
+    ["piano", "Instrumental"],
+    ["eurodance", "Eletrônica"],
+    ["banda", "Rock"],
+    ["nacional", "MPB"],
+  ];
+  for (const [k, label] of tags) {
+    if (t.includes(k)) return label;
+  }
+  return null;
 }
 
 function cleanAudioPart(s: string): string {
