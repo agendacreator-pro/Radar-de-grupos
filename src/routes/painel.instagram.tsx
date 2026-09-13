@@ -107,6 +107,8 @@ import {
   useInstagramRadar,
 } from "@/hooks/useInstagramRadar";
 import { clientResolveAudio } from "@/lib/instagram-radar-engine";
+import { ContentTransformDialog } from "@/components/instagram/content-transform-dialog";
+import type { ContentBlueprint } from "@/lib/instagram-content";
 
 export const Route = createFileRoute("/painel/instagram")({
   head: () => ({
@@ -254,7 +256,7 @@ function TrendCard({
             className="bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white hover:from-[#DD2A7B] hover:via-[#C13584] hover:to-[#962FBF]"
             onClick={() => onTransform(t)}
           >
-            <Wand2 className="size-3.5" /> Transformar trend
+            <Wand2 className="size-3.5" /> Transformar em conteúdo
           </Button>
           <Button size="sm" variant="outline" onClick={() => onAgendar(t)}>
             <Calendar className="size-3.5" /> Agendar
@@ -1128,6 +1130,9 @@ function RadarInstagramPage() {
   const [audioGroupMode, setAudioGroupMode] = useState<"geral" | "estilos">("geral");
   const [contentDialog, setContentDialog] = useState(false);
   const [content, setContent] = useState<InstaContent | null>(null);
+  const [contentTrend, setContentTrend] = useState<InstaTrend | null>(null);
+  const [transformDialog, setTransformDialog] = useState(false);
+  const [transformTrend, setTransformTrend] = useState<InstaTrend | null>(null);
   const [planDialog, setPlanDialog] = useState(false);
   const [planDraft, setPlanDraft] = useState({
     dia: "seg",
@@ -1251,7 +1256,28 @@ function RadarInstagramPage() {
   function transformFromFormato(t: InstaTrend) {
     setFormatoDialog(false);
     setFormatoSel(null);
-    void openContent(t);
+    openTransform(t);
+  }
+
+  function openTransform(t: InstaTrend) {
+    setTransformTrend(t);
+    setTransformDialog(true);
+  }
+
+  function saveFromBlueprint(b: ContentBlueprint) {
+    setPlanDraft({
+      dia: "seg",
+      formato: b.format,
+      trend: b.trend.nome,
+      audio: b.trend.categoria === "audio" ? String(b.trend.nome).replace(/^🎵\s*/, "") : "",
+      ideia: b.ideia,
+      gancho: b.hook,
+      objetivo: b.objective.label,
+    });
+    setTransformDialog(false);
+    setTransformTrend(null);
+    setPlanDialog(true);
+    toast.success("Ideia preparada no planejamento — ajuste e salve.");
   }
 
   function agendarFromFormato(t: InstaTrend) {
@@ -1329,6 +1355,12 @@ function RadarInstagramPage() {
     setContentDialog(true);
     try {
       const c = await genContent.mutateAsync(trend?.id);
+      let trendObj = trend ?? null;
+      if (!trendObj && c.trend && data?.trends?.length) {
+        trendObj =
+          data.trends.find((tt) => tt.nome.toLowerCase() === String(c.trend).toLowerCase()) ?? null;
+      }
+      setContentTrend(trendObj);
       setContent(c);
     } catch (e) {
       toast.error("Falha ao gerar conteúdo.");
@@ -1684,6 +1716,7 @@ function RadarInstagramPage() {
         loading={genContent.isPending}
         onOpenChange={setContentDialog}
         onAgendar={openPlanFromContent}
+        {...(contentTrend ? { onTransform: () => openTransform(contentTrend) as void } : {})}
       />
 
       {/* Formatos em alta — modal de análise do formato */}
@@ -1696,6 +1729,28 @@ function RadarInstagramPage() {
         }}
         onTransform={transformFromFormato}
         onAgendar={agendarFromFormato}
+      />
+
+      {/* Transformar tendência em conteúdo */}
+      <ContentTransformDialog
+        open={transformDialog}
+        trend={transformTrend}
+        keywords={config?.keywords ?? []}
+        onOpenChange={(open) => {
+          setTransformDialog(open);
+          if (!open) setTransformTrend(null);
+        }}
+        onSalvarIdeia={saveFromBlueprint}
+      />
+
+      {/* Planejamento semanal */}
+      <PlanDialog
+        open={planDialog}
+        draft={planDraft}
+        onDraftChange={changeDraft}
+        onSave={() => void savePlan()}
+        onOpenChange={setPlanDialog}
+        saving={planSave.isPending}
       />
 
       {/* Tendências */}
@@ -2572,12 +2627,14 @@ function ContentDialog({
   loading,
   onOpenChange,
   onAgendar,
+  onTransform,
 }: {
   open: boolean;
   content: InstaContent | null;
   loading: boolean;
   onOpenChange: (open: boolean) => void;
   onAgendar: (c: InstaContent) => void;
+  onTransform?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => setCopied(false), [content]);
@@ -2689,6 +2746,11 @@ function ContentDialog({
               </div>
             )}
             <div className="flex flex-wrap gap-2">
+              {onTransform && content && (
+                <Button variant="outline" onClick={onTransform}>
+                  <Wand2 className="size-4" /> Transformar em conteúdo
+                </Button>
+              )}
               <Button
                 className="bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] text-white hover:from-[#DD2A7B] hover:via-[#C13584] hover:to-[#962FBF]"
                 onClick={() => onAgendar(content)}
