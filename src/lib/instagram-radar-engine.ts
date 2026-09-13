@@ -575,9 +575,12 @@ function toTrendRow(t: InstaTrend): Record<string, unknown> {
     fonte_detalhe: t.fonte_detalhe,
     url: t.url,
     coletado_em: t.coletado_em,
-    first_seen_at: t.first_seen_at ?? null,
-    last_seen_at: t.last_seen_at ?? null,
-    seen_count: t.seen_count ?? null,
+    first_seen_at: t.first_seen_at ?? t.coletado_em ?? null,
+    last_seen_at: t.last_seen_at ?? t.coletado_em ?? null,
+    seen_count:
+      typeof t.seen_count === "number" && Number.isInteger(t.seen_count) && t.seen_count > 0
+        ? t.seen_count
+        : 1,
   };
 }
 
@@ -1407,6 +1410,9 @@ async function runAnalysis(
       fonte_detalhe: a.fonte_detalhe,
       url: a.url,
       coletado_em: a.coletado_em,
+      first_seen_at: a.first_seen_at ?? a.coletado_em ?? null,
+      last_seen_at: a.last_seen_at ?? a.coletado_em ?? null,
+      seen_count: a.seen_count ?? 1,
     });
   }
 
@@ -2382,16 +2388,33 @@ export const instaRadarRun = createServerFn({ method: "POST" })
 
         const now = new Date().toISOString();
         const next = new Date(Date.now() + MIN_RUN_INTERVAL_MS).toISOString();
+        const failures: string[] = [];
+        const save = async (step: string, op: Promise<{ error?: unknown }>) => {
+          try {
+            const r = await op;
+            if (r && r.error) {
+              failures.push(`${step}: ${String(r.error).slice(0, 220)}`);
+            }
+          } catch (e) {
+            failures.push(`${step}: ${String(e).slice(0, 220)}`);
+          }
+        };
         if (result.trends.length) {
-          await admin.from("insta_radar_trends").upsert(
-            result.trends.map((t) => ({ user_id: userId, ...toTrendRow(t), updated_at: now })),
-            { onConflict: "user_id,nome" },
+          await save(
+            "tendências",
+            admin.from("insta_radar_trends").upsert(
+              result.trends.map((t) => ({ user_id: userId, ...toTrendRow(t), updated_at: now })),
+              { onConflict: "user_id,nome" },
+            ),
           );
         }
         if (result.audios.length) {
-          await admin.from("insta_radar_audios").upsert(
-            result.audios.map((a) => ({ user_id: userId, ...toAudioRow(a), updated_at: now })),
-            { onConflict: "user_id,nome" },
+          await save(
+            "áudios",
+            admin.from("insta_radar_audios").upsert(
+              result.audios.map((a) => ({ user_id: userId, ...toAudioRow(a), updated_at: now })),
+              { onConflict: "user_id,nome" },
+            ),
           );
         }
         // Quando a parada oficial é a fonte, remove apenas os lixos restantes
@@ -2399,39 +2422,53 @@ export const instaRadarRun = createServerFn({ method: "POST" })
         // que com um ranking de áudios quebrados.
         if (result.chart_used && result.audios.length) {
           const keep = result.audios.map((a) => a.nome.toLowerCase());
-          try {
-            await admin
+          await save(
+            "limpeza de áudios",
+            admin
               .from("insta_radar_audios")
               .delete()
               .eq("user_id", userId)
-              .filter("nome", "not.in", keep);
-          } catch {
-            // limpeza é best-effort
-          }
-        }
-        await admin.from("insta_radar_history").insert({ user_id: userId, resumo: result.resumo });
-        if (result.alerts.length) {
-          await admin.from("insta_radar_alerts").insert(
-            result.alerts.map((a) => ({
-              user_id: userId,
-              tipo: a.tipo,
-              titulo: a.titulo,
-              descricao: a.descricao,
-              criado_em: a.criado_em,
-            })),
+              .filter("nome", "not.in", keep),
           );
         }
-        await admin.from("insta_radar_config").upsert({
-          user_id: userId,
-          keywords: config.keywords,
-          status: "ok",
-          last_run_at: now,
-          next_run_at: next,
-          alert_count: config.alert_count + result.alerts.length,
-          disabled: false,
-          last_error: null,
-          updated_at: now,
-        });
+        await save(
+          "histórico",
+          admin.from("insta_radar_history").insert({ user_id: userId, resumo: result.resumo }),
+        );
+        if (result.alerts.length) {
+          await save(
+            "alertas",
+            admin.from("insta_radar_alerts").insert(
+              result.alerts.map((a) => ({
+                user_id: userId,
+                tipo: a.tipo,
+                titulo: a.titulo,
+                descricao: a.descricao,
+                criado_em: a.criado_em,
+              })),
+            ),
+          );
+        }
+        await save(
+          "config",
+          admin.from("insta_radar_config").upsert({
+            user_id: userId,
+            keywords: config.keywords,
+            status: failures.length ? "erro" : "ok",
+            last_run_at: now,
+            next_run_at: next,
+            alert_count: config.alert_count + result.alerts.length,
+            disabled: false,
+            last_error: failures.length ? failures.join("; ").slice(0, 300) : null,
+            updated_at: now,
+          }),
+        );
+        if (failures.length) {
+          return {
+            success: false,
+            error: `O radar concluiu, mas a gravação não fechou (${failures.length} etapa(s)). ${failures[0]}`,
+          };
+        }
         return { success: true, result };
       } catch (err) {
         console.error("[insta-radar] run:", err);
