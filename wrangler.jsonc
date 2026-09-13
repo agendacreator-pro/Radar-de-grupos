@@ -2,6 +2,9 @@
 // Vars plain-text (SUPABASE_URL é pública; publishable key é feita para ir ao
 // cliente). Segredos (SUPABASE_SERVICE_ROLE_KEY, TAVILY_API_KEY, opcional
 // BRAVE_API_KEY) ficam no Cloudflare via: npx wrangler secret put -n radar-de-grupos
+// IA (Radar do Algoritmo — gerar conteúdo): a CHAVE é secret server-side,
+// NUNCA VITE_*: npx wrangler secret put LLM_API_KEY --name radar-de-grupos
+// Base URL e modelo NÃO são segredo → vars plain-text abaixo (LLM_BASE_URL/LLM_MODEL).
 // Deploy: npm run build; npx wrangler deploy -c wrangler.jsonc
 {
   "name": "radar-de-grupos",
@@ -16,6 +19,8 @@
   },
   "vars": {
     "SUPABASE_URL": "https://yhjmulicddyclnqmodlk.supabase.co",
-    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_9--LmFEWqBcfsE7Ppitneg_81_eK1yb"
+    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_9--LmFEWqBcfsE7Ppitneg_81_eK1yb",
+    "LLM_BASE_URL": "https://api.groq.com/openai/v1",
+    "LLM_MODEL": "llama-3.3-70b-versatile"
   }
 }

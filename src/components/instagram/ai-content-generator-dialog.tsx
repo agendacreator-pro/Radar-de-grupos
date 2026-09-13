@@ -126,12 +126,6 @@ export function AiContentGeneratorDialog({
               <Wand2 className="size-6 animate-pulse" />
             </div>
             <p className="text-sm font-medium text-foreground">{INSTA_AI_LOADING_MESSAGE}</p>
-            {!state.configurada && (
-              <p className="max-w-sm text-xs text-amber-700">
-                Atenção: a chave de IA (VITE_LLM_API_KEY) ainda não está configurada — a geração não
-                vai concluir até ela existir no .env.
-              </p>
-            )}
           </div>
         )}
 
@@ -144,11 +138,9 @@ export function AiContentGeneratorDialog({
                 <p className="mt-0.5 text-xs">{state.message}</p>
                 {!state.configurada && (
                   <p className="mt-1.5 text-xs">
-                    No arquivo <code className="rounded bg-amber-100 px-1">.env</code>, adicione{" "}
-                    <code className="rounded bg-amber-100 px-1">VITE_LLM_API_KEY</code> (opcionais:{" "}
-                    <code className="rounded bg-amber-100 px-1">VITE_LLM_BASE_URL</code> e{" "}
-                    <code className="rounded bg-amber-100 px-1">VITE_LLM_MODEL</code>) e rode um
-                    novo build/deploy.
+                    A chave de IA ainda não está configurada no servidor do Radar (segredo no
+                    Worker). Quando estiver ativa, a geração passa a funcionar — nenhuma resposta é
+                    fabricada enquanto isso.
                   </p>
                 )}
               </div>

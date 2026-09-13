@@ -7,13 +7,17 @@
 // (prompt, separação dados×instruções, normalização da resposta)
 // fica na camada pura — aqui só existe transporte + configuração.
 //
-// Configuração (Vite, via .env — nada de chave em código):
-//   VITE_LLM_API_KEY   (obrigatório)  chave do provedor
-//   VITE_LLM_BASE_URL  (opcional)     padrão https://api.openai.com/v1
-//   VITE_LLM_MODEL     (opcional)     padrão gpt-4o-mini
+// SEGURANÇA: este módulo roda SOMENTE no servidor (Worker Cloudflare),
+// acoplado à server function `instaRadarAiGenerate` (instagram-ai-server.ts).
+// A chave é lida EXCLUSIVAMENTE de variáveis de ambiente do servidor
+// (process.env.LLM_API_KEY) — NUNCA de variáveis VITE_*, que entram no
+// bundle do cliente, e NUNCA hardcoded no código.
+//   LLM_API_KEY   (obrigatório)  chave do provedor → secret do Worker
+//   LLM_BASE_URL  (opcional)     padrão https://api.openai.com/v1
+//   LLM_MODEL     (opcional)     padrão gpt-4o-mini
 //
 // Honestidade: sem chave/configuração, NUNCA fabrica resposta —
-// retorna erro claro pedindo a configuração.
+// retorna erro claro pedindo a configuração no servidor.
 // ============================================================
 
 import {
@@ -29,6 +33,10 @@ export const INSTA_AI_DEFAULT_BASE_URL = "https://api.openai.com/v1";
 export const INSTA_AI_DEFAULT_MODEL = "gpt-4o-mini";
 export const INSTA_AI_DEFAULT_TIMEOUT_MS = 60_000;
 
+export const INSTA_AI_NOT_CONFIGURED_MESSAGE =
+  "IA ainda não configurada no servidor: o segredo LLM_API_KEY não está definido no Worker. " +
+  "Defina via `npx wrangler secret put LLM_API_KEY` (base LLM_BASE_URL e modelo LLM_MODEL opcionais) e rode um novo deploy.";
+
 export interface AiEngineConfig {
   apiKey?: string | null;
   baseUrl?: string | null;
@@ -38,20 +46,23 @@ export interface AiEngineConfig {
   fetchImpl?: typeof fetch;
 }
 
-function readEnv(key: string): string | null {
-  const value = import.meta.env?.[key];
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
 /**
- * Lê a configuração real do ambiente (Vite/.env). Não deixa chave
- * vazar para logs — apenas o erro de configuração é exposto.
+ * Lê a configuração do provedor SOMENTE de variáveis de ambiente
+ * SERVER-SIDE (`process.env`, ou um `env` injetado nos testes).
+ *
+ * Nenhuma variável `VITE_*` é lida aqui — `VITE_*` vira bundle do
+ * cliente e não pode carregar segredos. O `env` injetável existe
+ * apenas para os testes unitários nunca tocarem a rede.
  */
-export function resolveAiConfig(): AiEngineConfig {
+export function resolveAiServerConfig(env?: Record<string, string | undefined>): AiEngineConfig {
+  const e: Record<string, string | undefined> =
+    env ?? (process.env as Record<string, string | undefined>);
+  const clean = (v: unknown): string | null =>
+    typeof v === "string" && v.trim() ? v.trim() : null;
   return {
-    apiKey: readEnv("VITE_LLM_API_KEY"),
-    baseUrl: readEnv("VITE_LLM_BASE_URL") ?? INSTA_AI_DEFAULT_BASE_URL,
-    model: readEnv("VITE_LLM_MODEL") ?? INSTA_AI_DEFAULT_MODEL,
+    apiKey: clean(e["LLM_API_KEY"]),
+    baseUrl: clean(e["LLM_BASE_URL"]) ?? INSTA_AI_DEFAULT_BASE_URL,
+    model: clean(e["LLM_MODEL"]) ?? INSTA_AI_DEFAULT_MODEL,
     timeoutMs: INSTA_AI_DEFAULT_TIMEOUT_MS,
   };
 }
@@ -83,9 +94,10 @@ function combineSignals(
 /**
  * Gera o conteúdo completo a partir do payload do blueprint.
  *
- * Retorna uma união com status explícito: `ok` (conteúdo
- * normalizado), `error` (mensagem honesta, sem detalhe interno) ou
- * `cancelled` (o caller abortou). Nenhuma exceção escapa.
+ * Roda no servidor (segredo via `resolveAiServerConfig`). Retorna
+ * uma união com status explícito: `ok` (conteúdo normalizado),
+ * `error` (mensagem honesta, sem detalhe interno) ou `cancelled`
+ * (o caller abortou). Nenhuma exceção escapa.
  */
 export async function generateAiContent(
   payload: ContentBlueprintPayload,
@@ -95,14 +107,10 @@ export async function generateAiContent(
     signal?: AbortSignal | null;
   },
 ): Promise<AiResult> {
-  const config = opts?.config ?? resolveAiConfig();
+  const config = opts?.config ?? resolveAiServerConfig();
   const apiKey = String(config.apiKey ?? "").trim();
   if (!apiKey) {
-    return {
-      status: "error",
-      error:
-        "IA não configurada: adicione VITE_LLM_API_KEY (e opcionalmente VITE_LLM_BASE_URL / VITE_LLM_MODEL) no .env e rode um novo build.",
-    };
+    return { status: "error", error: INSTA_AI_NOT_CONFIGURED_MESSAGE };
   }
 
   const { signal, timer } = combineSignals(
@@ -173,7 +181,7 @@ export async function generateAiContent(
     return {
       status: "error",
       error:
-        "Falha ao gerar o conteúdo. Confira a sua conexão e a configuração da IA (VITE_LLM_API_KEY) e tente de novo.",
+        "Falha ao gerar o conteúdo. Confira a sua conexão e a configuração da IA (LLM_API_KEY no servidor) e tente de novo.",
     };
   } finally {
     clearTimeout(timer);
