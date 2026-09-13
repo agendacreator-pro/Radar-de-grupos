@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Bot, Info, Save, Sparkles, Wand2 } from "lucide-react";
-import { toast } from "sonner";
+import { AlertTriangle, Bot, Save, Sparkles, Wand2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,13 +23,14 @@ import {
 } from "@/lib/instagram-radar";
 import { INSTA_OBJETIVOS, type InstaObjetivo } from "@/lib/instagram-recommend";
 import {
-  INSTA_BLUEPRINT_PREPARACAO,
   INSTA_BLUEPRINT_TRANSPARENCIA,
   buildContentBlueprint,
+  prepareBlueprintPayload,
   type ContentBlueprint,
 } from "@/lib/instagram-content";
 import { normalizeTrendFormat, normPhrase } from "@/lib/instagram-quality";
 import { trendNichoEfetivo } from "@/lib/instagram-formatos";
+import { AiContentGeneratorDialog } from "@/components/instagram/ai-content-generator-dialog";
 
 // ------------------------------------------------------------
 // "✨ Transformar tendência em conteúdo" — painel de blueprint
@@ -69,7 +69,7 @@ export function ContentTransformDialog({
   const [objective, setObjective] = useState<InstaObjetivo>("engajamento");
   const [nicheChoice, setNicheChoice] = useState<string | null>(null);
   const [formatSel, setFormatSel] = useState<string | null>(null);
-  const [preparing, setPreparing] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
 
   // Reseta o painel a cada tendência selecionada (objeto completo preservado).
   useEffect(() => {
@@ -77,7 +77,7 @@ export function ContentTransformDialog({
       setObjective("engajamento");
       setNicheChoice(null);
       setFormatSel(null);
-      setPreparing(false);
+      setAiOpen(false);
     }
   }, [trend]);
 
@@ -371,31 +371,11 @@ export function ContentTransformDialog({
           </p>
         </div>
 
-        {preparing && (
-          <div className="flex items-start gap-2 rounded-lg border border-sky-300/60 bg-sky-50 px-3 py-2 text-xs text-sky-800">
-            <Info className="mt-0.5 size-4 shrink-0 text-sky-600" />
-            <span>{INSTA_BLUEPRINT_PREPARACAO}</span>
-            <button
-              type="button"
-              onClick={() => setPreparing(false)}
-              className="ml-auto shrink-0 font-semibold text-sky-700 hover:underline"
-            >
-              Entendi
-            </button>
-          </div>
-        )}
-
         <div className="flex flex-wrap items-center justify-end gap-2">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Fechar
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setPreparing(true);
-              toast.info("Redação com IA fica para a próxima etapa.");
-            }}
-          >
+          <Button variant="outline" onClick={() => setAiOpen(true)}>
             <Bot className="size-4" />
             Gerar conteúdo completo
           </Button>
@@ -408,6 +388,12 @@ export function ContentTransformDialog({
           </Button>
         </div>
       </DialogContent>
+
+      <AiContentGeneratorDialog
+        open={aiOpen}
+        payload={prepareBlueprintPayload(bp)}
+        onOpenChange={setAiOpen}
+      />
     </Dialog>
   );
 }
