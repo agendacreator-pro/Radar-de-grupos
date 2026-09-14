@@ -44,6 +44,32 @@ export interface AiEngineConfig {
   timeoutMs?: number;
   /** Injetável para testes (padrão: fetch global). */
   fetchImpl?: typeof fetch;
+  /**
+   * Observabilidade server-side SEM segredos: chamado depois que o fetch
+   * do provedor resolve, com o endpoint efetivamente usado e o status HTTP.
+   * NUNCA recebe a chave. Usado p/ logs do Worker (wrangler tail) e testes.
+   */
+  onFetchSettled?: (info: { endpoint: string; status: number; ok: boolean }) => void;
+}
+
+/** Mensagem honesta e acionável por categoria de status do provedor. */
+function describeHttpStatus(status: number): string {
+  if (status === 400) {
+    return `O provedor de IA recusou a requisição (HTTP 400). Verifique o modelo configurado (LLM_MODEL) e os dados informados.`;
+  }
+  if (status === 401 || status === 403) {
+    return `O provedor de IA rejeitou a chave de acesso (HTTP ${status}). Confira o segredo LLM_API_KEY do servidor.`;
+  }
+  if (status === 404) {
+    return `O provedor de IA não encontrou o endpoint (HTTP 404). Confira a variável LLM_BASE_URL no servidor (ex.: https://api.groq.com/openai/v1) e o modelo LLM_MODEL.`;
+  }
+  if (status === 429) {
+    return `O provedor de IA atingiu o limite de requisições (HTTP 429). Aguarde um pouco e tente de novo.`;
+  }
+  if (status >= 500) {
+    return `O provedor de IA está com instabilidade no momento (HTTP ${status}). Tente novamente em instantes.`;
+  }
+  return `O serviço de IA respondeu com erro (HTTP ${status}). Tente novamente em instantes.`;
 }
 
 /**
@@ -136,19 +162,28 @@ export async function generateAiContent(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Accept: "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify(body),
       signal,
     });
 
+    const settled = (ok: boolean) => {
+      if (typeof config.onFetchSettled === "function") {
+        try {
+          config.onFetchSettled({ endpoint, status: res.status, ok });
+        } catch {
+          // Um log nunca pode derrubar a resposta.
+        }
+      }
+    };
+
     if (!res.ok) {
-      const detail = String(res.status);
-      return {
-        status: "error",
-        error: `O serviço de IA respondeu com erro (HTTP ${detail}). Tente novamente em instantes.`,
-      };
+      settled(false);
+      return { status: "error", error: describeHttpStatus(res.status) };
     }
+    settled(true);
 
     const data = (await res.json()) as {
       choices?: { message?: { content?: string } }[];
@@ -181,7 +216,7 @@ export async function generateAiContent(
     return {
       status: "error",
       error:
-        "Falha ao gerar o conteúdo. Confira a sua conexão e a configuração da IA (LLM_API_KEY no servidor) e tente de novo.",
+        "Falha ao gerar o conteúdo: não foi possível contactar o provedor de IA. Confira a conexão e a variável LLM_BASE_URL do servidor e tente de novo.",
     };
   } finally {
     clearTimeout(timer);

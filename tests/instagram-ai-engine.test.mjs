@@ -173,6 +173,75 @@ test("generateAiContent: HTTP 500 → error", async () => {
   if (res.status === "error") assert.match(res.error, /HTTP 500/);
 });
 
+test("generateAiContent: HTTP 401 → erro de chave (não mascara como 404)", async () => {
+  const res = await generateAiContent(makePayload(), {
+    config: { ...GOOD_CONFIG, fetchImpl: jsonFetch({}, { status: 401 }) },
+  });
+  assert.equal(res.status, "error");
+  if (res.status === "error") {
+    assert.match(res.error, /HTTP 401/);
+    assert.match(res.error, /LLM_API_KEY/);
+  }
+});
+
+test("generateAiContent: HTTP 404 → erro aponta LLM_BASE_URL (diagnóstico honesto)", async () => {
+  const res = await generateAiContent(makePayload(), {
+    config: { ...GOOD_CONFIG, fetchImpl: jsonFetch({}, { status: 404 }) },
+  });
+  assert.equal(res.status, "error");
+  if (res.status === "error") {
+    assert.match(res.error, /HTTP 404/);
+    assert.match(res.error, /LLM_BASE_URL/);
+  }
+});
+
+test("generateAiContent: HTTP 429 → erro de limite", async () => {
+  const res = await generateAiContent(makePayload(), {
+    config: { ...GOOD_CONFIG, fetchImpl: jsonFetch({}, { status: 429 }) },
+  });
+  assert.equal(res.status, "error");
+  if (res.status === "error") {
+    assert.match(res.error, /HTTP 429/);
+    assert.match(res.error, /limite/);
+  }
+});
+
+test("generateAiContent: endpoint correto (sem barra final, sem /v1 duplicado) via onFetchSettled", async () => {
+  const seen = [];
+  const res = await generateAiContent(makePayload(), {
+    config: {
+      ...GOOD_CONFIG,
+      baseUrl: "https://api.groq.com/openai/v1/",
+      fetchImpl: jsonFetch({
+        choices: [{ message: { content: JSON.stringify({ idea: "i", hook: "h" }) } }],
+      }),
+      onFetchSettled: (info) => seen.push(info),
+    },
+  });
+  assert.equal(res.status, "ok");
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].endpoint, "https://api.groq.com/openai/v1/chat/completions");
+  assert.equal(seen[0].ok, true);
+  assert.ok(seen[0].status >= 200 && seen[0].status < 300);
+});
+
+test("generateAiContent: onFetchSettled é notificado em erro SEM segredo", async () => {
+  const seen = [];
+  const res = await generateAiContent(makePayload(), {
+    config: {
+      ...GOOD_CONFIG,
+      fetchImpl: jsonFetch({}, { status: 404 }),
+      onFetchSettled: (info) => seen.push(info),
+    },
+  });
+  assert.equal(res.status, "error");
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].endpoint, `${INSTA_AI_DEFAULT_BASE_URL}/chat/completions`);
+  assert.equal(seen[0].status, 404);
+  assert.equal(seen[0].ok, false);
+  assert.doesNotMatch(JSON.stringify(seen), /sk-para-teste/, "hook nunca deve expor a chave");
+});
+
 test("generateAiContent: resposta não-JSON → error", async () => {
   const res = await generateAiContent(makePayload(), {
     config: {

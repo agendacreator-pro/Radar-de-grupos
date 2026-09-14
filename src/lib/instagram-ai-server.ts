@@ -48,12 +48,26 @@ export const instaRadarAiGenerate = createServerFn({ method: "POST" })
       return { status: "error", error: "Payload do blueprint não informado.", configurada: false };
     }
 
-    const userId = await verifyUser(data.token);
+    let userId: string | null;
+    try {
+      userId = await verifyUser(data.token);
+    } catch (err) {
+      console.error("[instaRadarAiGenerate] verifyUser:", err);
+      return {
+        status: "error",
+        error: "Erro de configuração do servidor. Tente novamente em instantes.",
+        configurada: false,
+      };
+    }
     if (!userId) {
       return { status: "error", error: "Sessão expirada. Entre novamente.", configurada: false };
     }
 
     const config: AiEngineConfig = resolveAiServerConfig();
+    config.onFetchSettled = ({ endpoint, status, ok }) => {
+      // Log server-side SEM segredo: endpoint + status HTTP do provedor.
+      console.warn(`[instaRadarAiGenerate] provider ${endpoint} status=${status} ok=${ok}`);
+    };
     const res = await generateAiContent(data.payload, {
       variation: data.variation ?? null,
       config,
