@@ -21,6 +21,6 @@
     "SUPABASE_URL": "https://yhjmulicddyclnqmodlk.supabase.co",
     "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_9--LmFEWqBcfsE7Ppitneg_81_eK1yb",
     "LLM_BASE_URL": "https://api.groq.com/openai/v1",
-    "LLM_MODEL": "llama-3.3-70b-versatile"
+    "LLM_MODEL": "openai/gpt-oss-120b"
   }
 }
