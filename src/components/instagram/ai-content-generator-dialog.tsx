@@ -16,6 +16,7 @@ import { INSTA_AI_LOADING_MESSAGE } from "@/lib/instagram-ai";
 import type { AISlide, GeneratedContent } from "@/lib/instagram-ai";
 import { useInstagramAi } from "@/hooks/useInstagramAi";
 import type { ContentBlueprintPayload } from "@/lib/instagram-content";
+import { formatHora } from "@/lib/instagram-radar";
 
 // ------------------------------------------------------------
 // "✨ Gerar conteúdo completo com IA" — dialog com o resultado
@@ -38,9 +39,52 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
-function buildPlainText(c: GeneratedContent): string {
+/**
+ * 🔎 SINAL DETECTADO PELO RADAR — montado de forma DETERMINÍSTICA a partir
+ * do payload (evidências reais do blueprint). Nunca inventa número: só
+ * exibe campos que existem de verdade no input.
+ */
+function SignalEvidenceBlock({ payload }: { payload: ContentBlueprintPayload }) {
+  const ev = payload.evidence;
+  const lines: { rotulo: string; valor: string }[] = [];
+  if (ev.formato) lines.push({ rotulo: "Formato identificado", valor: ev.formato });
+  if (ev.subformato) lines.push({ rotulo: "Subformato", valor: ev.subformato });
+  if (ev.tendencia) lines.push({ rotulo: "Tendência encontrada", valor: ev.tendencia });
+  if (ev.score != null) lines.push({ rotulo: "Score estimado", valor: `${ev.score}/100` });
+  if (ev.cicloLabel) lines.push({ rotulo: "Ciclo", valor: ev.cicloLabel });
+  if (ev.compat != null) lines.push({ rotulo: "Compatibilidade", valor: `${ev.compat}%` });
+  if (ev.crescimento != null) lines.push({ rotulo: "Crescimento", valor: `${ev.crescimento}` });
+  if (payload.trend.motivo) lines.push({ rotulo: "Motivo real", valor: payload.trend.motivo });
+  if (ev.primeiraVista) {
+    lines.push({ rotulo: "Vista pelo Radar desde", valor: formatHora(ev.primeiraVista) });
+  }
+  if (ev.seenCount != null) lines.push({ rotulo: "Vezes vista", valor: String(ev.seenCount) });
+  if (ev.qualidadeLabel) lines.push({ rotulo: "Qualidade do sinal", valor: ev.qualidadeLabel });
+  if (ev.fonte) lines.push({ rotulo: "Origem do dado", valor: ev.fonte });
+
+  if (!lines.length) return null;
+  return (
+    <Block title="🔎 Sinal detectado pelo Radar">
+      <div>
+        {lines.map((l) => (
+          <div
+            key={l.rotulo}
+            className="flex items-start justify-between gap-3 border-b border-border/50 py-1 last:border-0"
+          >
+            <span className="text-xs text-muted-foreground">{l.rotulo}</span>
+            <span className="text-right text-xs font-medium text-foreground">{l.valor}</span>
+          </div>
+        ))}
+      </div>
+    </Block>
+  );
+}
+
+function buildPlainText(c: GeneratedContent, payload: ContentBlueprintPayload | null): string {
   const lines: string[] = [];
   lines.push("🧩 Conteúdo gerado por IA — Radar do Algoritmo");
+  if (c.sourceTrendTitle) lines.push(`\n🎯 TENDÊNCIA USADA\n${c.sourceTrendTitle}`);
+  if (c.adaptationNote) lines.push(`\n💡 ADAPTAÇÃO PARA O NICHO\n${c.adaptationNote}`);
   if (c.title) lines.push(`\nTÍTULO\n${c.title}`);
   if (c.idea) lines.push(`\nIDEIA\n${c.idea}`);
   if (c.hook) lines.push(`\nGANCHO\n${c.hook}`);
@@ -64,6 +108,18 @@ function buildPlainText(c: GeneratedContent): string {
   if (c.keywords.length) lines.push(`\nPALAVRAS-CHAVE\n${c.keywords.join(", ")}`);
   if (c.visualDirection.length) lines.push(`\nDIREÇÃO VISUAL\n${c.visualDirection.join("\n")}`);
   if (c.notes) lines.push(`\nNOTAS\n${c.notes}`);
+  if (payload) {
+    const ev = payload.evidence;
+    const sinais: string[] = [];
+    if (ev.formato) sinais.push(`formato ${ev.formato}`);
+    if (ev.tendencia) sinais.push(`tendência "${ev.tendencia}"`);
+    if (ev.score != null) sinais.push(`score ${ev.score}/100`);
+    if (ev.cicloLabel) sinais.push(ev.cicloLabel);
+    if (ev.qualidadeLabel) sinais.push(`sinal ${ev.qualidadeLabel.toLowerCase()}`);
+    if (sinais.length) {
+      lines.push(`\n🔎 SINAL DETECTADO PELO RADAR\n${sinais.join(" · ")}`);
+    }
+  }
   return lines.join("\n");
 }
 
@@ -88,8 +144,8 @@ export function AiContentGeneratorDialog({
   }, [open, reset]);
 
   const plainText = useMemo(
-    () => (state.status === "done" ? buildPlainText(state.content) : ""),
-    [state],
+    () => (state.status === "done" ? buildPlainText(state.content, payload) : ""),
+    [state, payload],
   );
 
   const copiarTudo = async () => {
@@ -170,6 +226,20 @@ export function AiContentGeneratorDialog({
                 <Badge variant="secondary">{state.usedModel}</Badge>
               </div>
             </div>
+
+            {g.sourceTrendTitle && (
+              <Block title="🎯 Tendência usada">
+                <p className="text-sm font-bold text-foreground">{g.sourceTrendTitle}</p>
+              </Block>
+            )}
+
+            {g.adaptationNote && (
+              <Block title="💡 Adaptação para o nicho">
+                <p className="whitespace-pre-wrap text-sm text-foreground">{g.adaptationNote}</p>
+              </Block>
+            )}
+
+            {payload && <SignalEvidenceBlock payload={payload} />}
 
             {g.title && (
               <Block title="Título">

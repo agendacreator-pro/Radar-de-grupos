@@ -151,6 +151,8 @@ export type ContentBlueprintInput = {
 
 /** Payload exato da próxima etapa (redação por IA) — NÃO é executado ainda. */
 export type ContentBlueprintPayload = {
+  /** Id determinístico deste blueprint (rastreabilidade da geração por IA). */
+  id?: string;
   trend: InstaTrend;
   niche: InstaBlueprintNiche;
   objective: InstaBlueprintObjective;
@@ -163,6 +165,33 @@ export type ContentBlueprintPayload = {
   visualDirection: string[];
   evidence: InstaBlueprintEvidence;
 };
+
+/**
+ * Id determinístico e estável de um blueprint: derivado dos elementos
+ * que definem a geração (tendência + nicho + objetivo + formato + subformato).
+ * Mesmo input ⇒ mesmo id; permite provar "este conteúdo veio desta tendência".
+ */
+export function makeBlueprintPayloadId(input: {
+  trendId?: string | null;
+  niche?: string | null;
+  objectiveKey?: string | null;
+  format?: string | null;
+  subformat?: string | null;
+}): string {
+  const base = [
+    input.trendId ?? "",
+    input.niche ?? "",
+    input.objectiveKey ?? "",
+    input.format ?? "",
+    input.subformat ?? "",
+  ].join("|");
+  let h = 2166136261; // FNV-1a 32-bit
+  for (let i = 0; i < base.length; i++) {
+    h ^= base.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return `bp_${(h >>> 0).toString(36)}`;
+}
 
 export const INSTA_BLUEPRINT_TRANSPARENCIA =
   "Esta sugestão é uma adaptação da tendência detectada pelo Radar. Ela não representa garantia de alcance, viralização, engajamento ou vendas.";
@@ -620,6 +649,13 @@ export function buildContentBlueprint(input: ContentBlueprintInput): ContentBlue
  */
 export function prepareBlueprintPayload(b: ContentBlueprint): ContentBlueprintPayload {
   return {
+    id: makeBlueprintPayloadId({
+      trendId: b.trend.id ?? null,
+      niche: b.niche.niche ?? null,
+      objectiveKey: b.objective.key,
+      format: b.format,
+      subformat: b.subformat,
+    }),
     trend: b.trend,
     niche: b.niche,
     objective: b.objective,

@@ -23,6 +23,7 @@
 import {
   AiResponseError,
   buildAiMessages,
+  evaluateFidelity,
   normalizeGeneratedContent,
   parseLlmJson,
 } from "@/lib/instagram-ai";
@@ -203,7 +204,26 @@ export async function generateAiContent(
       };
     }
 
-    const normalized = normalizeGeneratedContent(parsed, payload.format, payload.subformat);
+    const normalized = normalizeGeneratedContent(
+      parsed,
+      payload.format,
+      payload.subformat,
+      payload,
+    );
+
+    // Fidelidade: recusa conteúdo genérico que ignore a tendência recebida
+    // (validação determinística, sem IA extra). Serve para o usuário pedir
+    // nova geração em vez de aceitar resposta que fugiu da tendência.
+    const fidelity = evaluateFidelity(normalized, payload);
+    if (!fidelity.ok) {
+      return {
+        status: "error",
+        error:
+          "O conteúdo gerado fugiu da tendência do Radar: " +
+          `${fidelity.problems.join("; ")}. Gere novamente.`,
+      };
+    }
+
     return {
       status: "ok",
       content: normalized,
